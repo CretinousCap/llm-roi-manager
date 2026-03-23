@@ -17,9 +17,11 @@ each module contributes.  Results are written to results/llm_results.jsonl.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import pathlib
 import sys
+import uuid
 
 # Allow running from the repo root or from inside examples/
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -71,11 +73,25 @@ def run(dry_run: bool = False) -> dict:
                  response so the rest of the pipeline can be exercised
                  without an API key.
     """
+    # ── 0. Generate run identifiers ───────────────────────────────────────────
+    task_id = str(uuid.uuid4())
+    prompt_hash = hashlib.md5(TASK['description'].encode()).hexdigest()
+
     # ── 1. Classify the task ──────────────────────────────────────────────────
     context = classify(TASK)
+    profile = context['profile']
     print(
         f'[1] Classify  dominant={context["dominant"]!r}  '
         f'confidence={context["confidence"]}'
+    )
+    print(
+        f'    profile   modality={profile["modality"]!r}  '
+        f'task_type={profile["task_type"]!r}  '
+        f'complexity={profile["complexity"]!r}  '
+        f'interaction_stage={profile["interaction_stage"]!r}  '
+        f'structure={profile["structure"]!r}  '
+        f'latency_sensitivity={profile["latency_sensitivity"]!r}  '
+        f'risk={profile["risk"]!r}'
     )
 
     # ── 2. Route to best LLM (ROI-aware) ─────────────────────────────────────
@@ -164,18 +180,28 @@ def run(dry_run: bool = False) -> dict:
         )
 
     # Print a preview of the response
-    preview = exec_result['text'][:200].replace('\n', '\\n')
+    response_text = exec_result['text']
+    preview = response_text[:200].replace('\n', '\\n')
     print(f'    response preview: {preview!r}')
+    response_chars = len(response_text)
+    response_tokens = exec_result['usage']['output_tokens']
 
     # ── 5. Evaluate response quality ──────────────────────────────────────────
     # Using heuristic evaluator here. In production, pass a judge_adapter:
     #   evaluator = Evaluator(judge_adapter=OpenAIAdapter(model='gpt-4o'))
     evaluator = Evaluator()
-    eval_result = evaluator.evaluate(TASK, exec_result['text'], context)
+    eval_result = evaluator.evaluate(TASK, response_text, context)
+    dims = eval_result['dimensions']
     print(
         f'[5] Evaluate  quality_score={eval_result["quality_score"]}  '
         f'method={eval_result["method"]!r}  '
         f'confidence={eval_result["confidence"]}'
+    )
+    print(
+        f'    dimensions  correctness={dims["correctness"]}  '
+        f'clarity={dims["clarity"]}  '
+        f'completeness={dims["completeness"]}  '
+        f'efficiency={dims["efficiency"]}'
     )
 
     # ── 6. Store result ───────────────────────────────────────────────────────
@@ -183,6 +209,8 @@ def run(dry_run: bool = False) -> dict:
     cost = exec_result['cost']
     usage = exec_result['usage']
     record = {
+        'task_id': task_id,
+        'prompt_hash': prompt_hash,
         'llm': exec_result['llm'],
         'model': exec_result['model'],
         'provider': exec_result['provider'],
@@ -193,16 +221,20 @@ def run(dry_run: bool = False) -> dict:
         'task_description': TASK['description'],
         'context_dominant': context['dominant'],
         'context_confidence': context['confidence'],
+        'task_profile': context['profile'],
         'router_preferred': preferred,
         'router_confidence': recommendation['confidence'],
         'token_budget': allocation['token_budget'],
         'input_tokens': usage['input_tokens'],
         'output_tokens': usage['output_tokens'],
+        'response_chars': response_chars,
+        'response_tokens': response_tokens,
         'cost_input_usd': cost['input_usd'],
         'cost_output_usd': cost['output_usd'],
         'cost_tool_usd': cost['tool_usd'],
         'cost_total_usd': cost['total_usd'],
         'quality_score': eval_result['quality_score'],
+        'eval_dimensions': dims,
         'eval_method': eval_result['method'],
         'billing': exec_result['billing'],
         'dry_run': dry_run,
