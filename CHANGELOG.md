@@ -18,6 +18,13 @@ Format: [Semantic Versioning](https://semver.org/)
   into the library. Callers subclass `LLMAdapter`, implement `complete()`, then
   register with `LLMExecutor.register()`. No API clients in the library itself.
 
+- `execution/openai_adapter.py`: `OpenAIAdapter` — concrete `LLMAdapter` for
+  OpenAI Chat Completions. Reads `OPENAI_API_KEY` from the environment (never
+  stored in source). Supports `gpt-4o-mini` (default), `gpt-4o`, and
+  `gpt-3.5-turbo`. Cost is estimated from a per-model table and returned
+  alongside `text` and `tokens_used`. The OpenAI client is initialised lazily
+  so importing the module requires no key.
+
 - `evaluation/evaluator.py`: `Evaluator` — LLM-as-judge quality scorer with
   heuristic fallback. Accepts an optional `judge_adapter` (any `LLMAdapter`);
   prompts the judge to score the response 0–10 and normalises to 0.0–1.0.
@@ -28,6 +35,14 @@ Format: [Semantic Versioning](https://semver.org/)
   persistence. Each execution result is stored as one JSON line. Supports
   `load_all()`, `load_by_llm()`, `load_by_context()`, `iter_records()`, and
   `record_count()` for offline analysis and ROI review.
+
+- `examples/run_task.py`: End-to-end pipeline example. Runs the full loop —
+  classify → route → allocate → execute → evaluate → store → track — with
+  a single `gpt-4o-mini` call. Supports `--dry-run` to exercise the pipeline
+  without an API key.
+
+- `requirements.txt`: Declares `openai>=1.0.0` as the only non-stdlib
+  dependency (required by `OpenAIAdapter`).
 
 - `agents/performance_tracker.py`: Extended `PerformanceTracker` into an ROI
   engine:
@@ -46,9 +61,14 @@ Format: [Semantic Versioning](https://semver.org/)
 - `core/__init__.py`: Added `EXECUTOR_DEFAULTS`, `EVALUATOR_DEFAULTS`, and
   `STORE_DEFAULTS` for the three new modules.
 
+- `core/registry.py`: Added `gpt4o_mini` entry (affinity: `neutral`,
+  cost: $0.0003/1k tokens) so the router can recommend and track it.
+
 ### Architecture Decisions
 - Execution layer uses an adapter pattern — zero LLM API imports inside the
   library; all provider-specific code lives in application-layer adapters.
+- `OpenAIAdapter` initialises the `openai.OpenAI` client lazily, so the module
+  can be imported and tested without setting `OPENAI_API_KEY`.
 - Evaluator uses LLM-as-judge (same adapter interface) with heuristic fallback
   so the evaluation pipeline works without a judge LLM during development.
 - JSONL chosen for the result store: append-only, human-readable, no schema

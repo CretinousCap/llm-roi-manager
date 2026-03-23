@@ -53,6 +53,14 @@ LLM_REGISTRY: dict = {
         'default_weight': 1.0,
         'cost_per_1k_tokens': 0.001,
     },
+    'gpt4o_mini': {
+        'score_fn': None,               # Set to GPT4oMiniAgent().score once implemented
+        'context_affinity': 'neutral',  # Capable across all context types
+        'default_weight': 1.0,
+        # Must stay in sync with _COST_PER_1K_TOKENS['gpt-4o-mini'] in
+        # execution/openai_adapter.py — update both during pricing reviews.
+        'cost_per_1k_tokens': 0.0003,   # Blended input+output; update from openai.com/pricing
+    },
     # ── Future LLMs go here ───────────────────────────────────────────────────
     # 'gpt4': {
     #     'score_fn': GPT4Agent().score,

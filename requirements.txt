@@ -1,0 +1,8 @@
+# LLM ROI Manager — Python dependencies
+#
+# Core library (core/, classifiers/, agents/, router/, budget/,
+# execution/, evaluation/, storage/) requires only the Python standard
+# library and has no entries here.
+#
+# The OpenAI adapter (execution/openai_adapter.py) requires:
+openai>=1.0.0

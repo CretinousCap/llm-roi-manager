@@ -186,8 +186,8 @@ class PerformanceTracker:
             return base  # No reference cost — cannot normalise
 
         # Reference cost per call: registry stores cost_per_1k_tokens, so we
-        # use it directly as the per-call reference assuming ~1k tokens/call.
-        # Adjust cost_per_1k_tokens in LLM_REGISTRY to match your actual usage.
+        # compare avg_cost_usd directly against it (baseline = 1k tokens/call).
+        # ref_cost_per_1k > 0 is guaranteed by the guard on line above.
         ref_cost_per_call = ref_cost_per_1k
 
         # Penalty = fraction by which actual cost exceeds reference.

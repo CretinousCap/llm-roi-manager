@@ -35,3 +35,6 @@ htmlcov/
 # Session data (exported tracker state — keep local, not in git)
 tracker_state/
 session_logs/
+
+# Result store (JSONL output from run_task.py — keep local, not in git)
+results/
