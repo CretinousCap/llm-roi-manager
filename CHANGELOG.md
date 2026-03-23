@@ -11,7 +11,50 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
-_(Add entries here before merging any logic changes)_
+### Added — Execution, Evaluation, and ROI Loop (v0.2.0)
+
+- `execution/llm_executor.py`: `LLMAdapter` abstract base class + `LLMExecutor`
+  dispatcher. Provides a thin adapter layer for wiring concrete LLM API clients
+  into the library. Callers subclass `LLMAdapter`, implement `complete()`, then
+  register with `LLMExecutor.register()`. No API clients in the library itself.
+
+- `evaluation/evaluator.py`: `Evaluator` — LLM-as-judge quality scorer with
+  heuristic fallback. Accepts an optional `judge_adapter` (any `LLMAdapter`);
+  prompts the judge to score the response 0–10 and normalises to 0.0–1.0.
+  When no judge is provided, falls back to a length-saturation + keyword-overlap
+  heuristic suitable for development and testing.
+
+- `storage/result_store.py`: `ResultStore` — thread-safe JSONL result
+  persistence. Each execution result is stored as one JSON line. Supports
+  `load_all()`, `load_by_llm()`, `load_by_context()`, `iter_records()`, and
+  `record_count()` for offline analysis and ROI review.
+
+- `agents/performance_tracker.py`: Extended `PerformanceTracker` into an ROI
+  engine:
+  - `record()` now accepts `cost_usd` (default 0.0 — backward compatible)
+  - History tuples are now `(quality_score, weight, cost_usd)`
+  - `roi_score()`: ROI-adjusted effectiveness (-1 to +1). Penalises LLMs whose
+    actual average cost exceeds the registry reference `cost_per_1k_tokens`.
+    Falls back to `score()` when no cost data is available.
+  - `summary()` now includes `total_cost_usd`, `mean_cost_usd`, and
+    `cost_per_quality_unit` per (llm, context_type) bucket.
+
+- `router/llm_router.py`: `route()` now accepts `use_roi=True` parameter.
+  When True, `_get_agent_score()` prefers `roi_score()` over `score()` when
+  the tracker has cost data, enabling cost-aware LLM selection.
+
+- `core/__init__.py`: Added `EXECUTOR_DEFAULTS`, `EVALUATOR_DEFAULTS`, and
+  `STORE_DEFAULTS` for the three new modules.
+
+### Architecture Decisions
+- Execution layer uses an adapter pattern — zero LLM API imports inside the
+  library; all provider-specific code lives in application-layer adapters.
+- Evaluator uses LLM-as-judge (same adapter interface) with heuristic fallback
+  so the evaluation pipeline works without a judge LLM during development.
+- JSONL chosen for the result store: append-only, human-readable, no schema
+  migration, trivially parseable by any data tool.
+- ROI scoring is additive to existing quality scoring — `use_roi=False` reverts
+  the router to the original quality-only effectiveness behaviour.
 
 ---
 

@@ -35,7 +35,8 @@ from __future__ import annotations
 
 def route(context: dict,
           tracker=None,
-          weights: dict = None) -> dict:
+          weights: dict = None,
+          use_roi: bool = True) -> dict:
     """
     Select the best LLM for a task given its context scores.
 
@@ -46,9 +47,13 @@ def route(context: dict,
         context: Output of task_classifier.classify() — must include
                  'context_scores' (dict) and 'confidence' (float).
         tracker: Optional PerformanceTracker instance. When provided,
-                 its score() is used instead of (or in addition to) the
-                 registry score_fn for LLMs that have enough historical data.
+                 its roi_score() (or score() when use_roi=False) is used
+                 instead of the registry score_fn for LLMs with sufficient
+                 historical data.
         weights: Override default_weight per LLM, e.g. {'claude': 1.5}.
+        use_roi: When True (default), prefer roi_score() over score() when
+                 cost data is available in the tracker. Set False to use
+                 quality-only effectiveness scores.
 
     Returns:
         dict with:
@@ -84,7 +89,8 @@ def route(context: dict,
         eff_w = base_w * regime_scale
         effective_weights[llm_name] = round(eff_w, 4)
 
-        agent_score = _get_agent_score(llm_name, reg, context, tracker)
+        agent_score = _get_agent_score(llm_name, reg, context, tracker,
+                                       use_roi=use_roi)
         agent_scores[llm_name] = round(agent_score, 4)
         weighted_scores[llm_name] = eff_w * agent_score
 
@@ -122,16 +128,23 @@ def route(context: dict,
 
 
 def _get_agent_score(llm_name: str, reg: dict,
-                     context: dict, tracker) -> float:
+                     context: dict, tracker,
+                     use_roi: bool = True) -> float:
     """
     Get the agent score for an LLM on the current task.
 
     Preference order:
-      1. PerformanceTracker (historical data — most accurate)
-      2. registry score_fn (static scoring heuristic)
-      3. Default 0.0 (neutral — let effective_weight alone decide)
+      1. PerformanceTracker roi_score() when use_roi=True and cost data exists
+         (historical ROI — most accurate when data is available)
+      2. PerformanceTracker score() — historical quality effectiveness
+      3. registry score_fn — static scoring heuristic
+      4. Default 0.0 — neutral; let effective_weight alone decide
     """
     if tracker is not None:
+        if use_roi and hasattr(tracker, 'roi_score'):
+            roi = tracker.roi_score(llm_name, context)
+            if roi != 0.0:
+                return roi
         score = tracker.score(llm_name, context)
         if score != 0.0:
             return score

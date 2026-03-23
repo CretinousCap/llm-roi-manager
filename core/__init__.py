@@ -46,6 +46,26 @@ BUDGET_DEFAULTS = {
     'min_confidence_scale': 0.4,
 }
 
+# ── Executor defaults ─────────────────────────────────────────────────────────
+EXECUTOR_DEFAULTS = {
+    # Token limit passed to adapters when allocation dict has no token_budget
+    'default_max_tokens': 2000,
+}
+
+# ── Evaluator defaults ────────────────────────────────────────────────────────
+EVALUATOR_DEFAULTS = {
+    # Max tokens the judge LLM is allowed to produce (score only, not prose)
+    'judge_max_tokens': 50,
+    # Truncate response text sent to the judge to limit prompt size
+    'max_response_chars': 4000,
+}
+
+# ── Result store defaults ─────────────────────────────────────────────────────
+STORE_DEFAULTS = {
+    # Default JSONL file path (relative to the working directory)
+    'default_path': 'results/llm_results.jsonl',
+}
+
 # ── Performance tracker defaults ──────────────────────────────────────────────
 TRACKER_DEFAULTS = {
     # Rolling window size for quality score history per LLM per task type

@@ -40,9 +40,9 @@ Task Description
      │               │
      ▼               ▼
 ┌─────────────────────────┐
-│  LLM Router             │  ← Context-weighted blending
+│  LLM Router             │  ← Context + ROI-weighted blending
 │  (llm_router.py)        │     Code task → more weight to code-specialist LLMs
-│                         │     Content task → more weight to writing LLMs
+│                         │     ROI data → penalise cost-overrunning LLMs
 │                         │     Output: recommendation dict
 └────────────┬────────────┘
              │
@@ -53,6 +53,21 @@ Task Description
 │ Budget   │   │ Session  │     Session tracks quality, cost, peak score
 │          │   │          │     IterationGuard kills runaway loops
 └──────────┘   └──────────┘
+             │
+    ┌────────┴────────┐
+    ▼                 ▼
+┌──────────┐   ┌──────────┐
+│  LLM     │   │Evaluator │  ← LLMExecutor dispatches to registered adapters
+│ Executor │   │          │     Evaluator scores quality (LLM-as-judge or
+│          │   │          │     heuristic fallback)
+└──────────┘   └──────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  Result Store           │  ← JSONL persistence for offline ROI analysis
+│  (result_store.py)      │     PerformanceTracker updated with cost + quality
+│                         │     roi_score() feeds back into the router
+└─────────────────────────┘
 ```
 
 ---
@@ -63,7 +78,8 @@ Task Description
 llm-roi-manager/
 │
 ├── core/
-│   ├── __init__.py             # TASK_DEFAULTS, SESSION_DEFAULTS, BUDGET_DEFAULTS
+│   ├── __init__.py             # TASK_DEFAULTS, SESSION_DEFAULTS, BUDGET_DEFAULTS,
+│   │                           # EXECUTOR_DEFAULTS, EVALUATOR_DEFAULTS, STORE_DEFAULTS
 │   ├── session.py              # WrapSession + IterationGuard
 │   └── registry.py             # LLM_REGISTRY
 │
@@ -71,13 +87,22 @@ llm-roi-manager/
 │   └── task_classifier.py      # classify(task) → context_scores
 │
 ├── agents/
-│   └── performance_tracker.py  # PerformanceTracker — per-LLM history
+│   └── performance_tracker.py  # PerformanceTracker — per-LLM history + ROI engine
 │
 ├── router/
-│   └── llm_router.py           # route(context) → recommendation
+│   └── llm_router.py           # route(context) → recommendation (ROI-aware)
 │
-└── budget/
-    └── token_allocator.py      # allocate(context, recommendation) → token_budget
+├── budget/
+│   └── token_allocator.py      # allocate(context, recommendation) → token_budget
+│
+├── execution/
+│   └── llm_executor.py         # LLMAdapter ABC + LLMExecutor dispatcher
+│
+├── evaluation/
+│   └── evaluator.py            # Evaluator — LLM-as-judge + heuristic fallback
+│
+└── storage/
+    └── result_store.py         # ResultStore — thread-safe JSONL persistence
 ```
 
 ---
@@ -184,4 +209,60 @@ Analogous to the quarterly review in HybridQuant's SOP.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.2.0 | 2026-03 | Execution layer, LLM-as-judge evaluator, JSONL result store, ROI engine |
 | v0.1.0 | 2026-03 | Initial multi-agent skeleton ported from HybridQuant patterns |
+
+---
+
+## Execution, Evaluation, and ROI Loop (v0.2.0)
+
+### LLM Executor (`execution/llm_executor.py`)
+
+Bridges the routing layer with real LLM API clients using an adapter pattern.
+
+```
+Application code:
+  class MyClaude(LLMAdapter):
+      def complete(self, prompt, max_tokens, **kwargs):
+          response = anthropic_client.messages.create(...)
+          return {'text': response.content, 'tokens_used': ..., 'cost_usd': ...}
+
+  executor = LLMExecutor()
+  executor.register('claude', MyClaude())
+  result = executor.execute(prompt, allocation)
+```
+
+### Evaluator (`evaluation/evaluator.py`)
+
+Scores response quality using a judge LLM or a heuristic fallback.
+
+```
+# LLM-as-judge: prompts a judge adapter to rate the response 0–10
+evaluator = Evaluator(judge_adapter=MyJudgeAdapter())
+result = evaluator.evaluate(task, response, context)
+# result['quality_score'] → 0.0–1.0
+# result['method']        → 'llm_judge' | 'heuristic'
+```
+
+### Result Store (`storage/result_store.py`)
+
+Persists each execution result as a JSONL line for offline analysis.
+
+```
+store = ResultStore('results/llm_results.jsonl')
+store.append({'llm': 'claude', 'quality_score': 0.85, 'cost_usd': 0.012, ...})
+records = store.load_by_llm('claude')
+```
+
+### ROI Engine (extended `agents/performance_tracker.py`)
+
+`PerformanceTracker` now tracks cost alongside quality. `roi_score()` returns
+an effectiveness score penalised when actual cost exceeds the registry reference.
+The router calls `roi_score()` by default (`use_roi=True`) and falls back to
+`score()` when no cost data is available.
+
+```
+tracker.record('claude', 'code_generation', quality_score=0.85, cost_usd=0.012)
+roi = tracker.roi_score('claude', context)   # penalised if cost > reference
+summary = tracker.summary('claude')          # includes cost_per_quality_unit
+```
