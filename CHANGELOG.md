@@ -11,6 +11,59 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added — Execution Observability and Billing Context (v0.4.0)
+
+**Execution observability (requirements 1–7):**
+
+- `execution/llm_executor.py`: Standardised execution result format. All
+  calls now return `status` ('success' | 'error' | 'unavailable'), `mode`,
+  `latency_ms`, `error` (`{'type', 'message'}` or `None`). Backward-compat
+  aliases `tokens_used`, `cost_usd`, and `skipped` are retained.
+  `_classify_error()` classifies adapter exceptions into 'quota',
+  'rate_limit', 'timeout', 'auth', or 'unknown' via safe string matching
+  (no SDK-specific type imports). `_normalise_billing()` enforces billing
+  defaults. Missing adapters now return `status='unavailable'` with
+  `error.type='adapter_missing'` — no silent fallback.
+
+- `execution/openai_adapter.py`: Added `import time`; `latency_ms` is now
+  measured around the API call and returned in the result dict. `mode='chat'`
+  is also returned to satisfy the standardised contract.
+
+- `agents/performance_tracker.py`: `record()` gains `status` and
+  `latency_ms` parameters. Records with `status != 'success'` increment
+  a per-LLM-per-context failure counter and are excluded from quality/cost
+  history. `_failures` and `_latency_ms` tracking dicts added. `summary()`
+  now exposes `failure_count` and `mean_latency_ms` for every context bucket.
+  `reset()` clears all three tracking structures.
+
+**Billing context (requirement 8):**
+
+- `execution/llm_executor.py`: `execute()` accepts an optional `metadata`
+  dict (`account`, `project`, `environment`). Missing keys default to
+  `account='unknown'`, `project='default'`, `environment='dev'`. The
+  normalised `billing` dict is included in every execution result.
+
+- `storage/result_store.py`: Added `load_by_billing_account(account)` and
+  `load_by_billing_project(project)` helper methods for simple in-memory
+  filtering of persisted records by billing context.
+
+- `examples/run_task.py`: Defines `BILLING_METADATA` (`personal /
+  llm-roi-manager / dev`). Passes it to `executor.execute()`. Prints billing
+  context at step 6. Stored record now includes `status`, `mode`,
+  `latency_ms`, `error`, and `billing`. Dry-run stub updated to include all
+  new standardised fields. `tracker.record()` call updated with `status` and
+  `latency_ms` arguments.
+
+**Architecture decisions:**
+- Billing context is tracking-only; it does not influence routing or adapter behaviour.
+- API keys are never stored in billing context or results.
+- Error classification uses string matching on `type(exc).__name__` and
+  `str(exc)` — not on SDK exception types — so it is provider-agnostic.
+- Latency is measured by the adapter (closest to the network call) and falls
+  back to executor-level wall-clock time when the adapter omits it.
+
+---
+
 ### Added — Models Registry and Pricing Engine (v0.3.0)
 
 - `models/registry.py`: Central `LLM_REGISTRY` keyed by `"provider:model"`.

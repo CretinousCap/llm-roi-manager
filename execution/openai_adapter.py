@@ -42,6 +42,7 @@ ENVIRONMENT:
 from __future__ import annotations
 
 import os
+import time
 
 from execution.llm_executor import LLMAdapter
 
@@ -114,12 +115,14 @@ class OpenAIAdapter(LLMAdapter):
 
         Returns:
             dict with:
-              text:     str   — generated text
-              model:    str   — model name used (e.g. 'gpt-4o-mini')
-              provider: str   — provider identifier ('openai')
-              usage:    dict  — {'input_tokens': int, 'output_tokens': int}
-              cost:     dict  — {'input_usd': float, 'output_usd': float,
-                                  'tool_usd': float, 'total_usd': float}
+              text:        str   — generated text
+              model:       str   — model name used (e.g. 'gpt-4o-mini')
+              provider:    str   — provider identifier ('openai')
+              mode:        str   — call mode ('chat')
+              latency_ms:  float — wall-clock time for the API call in ms
+              usage:       dict  — {'input_tokens': int, 'output_tokens': int}
+              cost:        dict  — {'input_usd': float, 'output_usd': float,
+                                    'tool_usd': float, 'total_usd': float}
         """
         from models.pricing import calculate_cost
 
@@ -132,6 +135,7 @@ class OpenAIAdapter(LLMAdapter):
 
         temperature = kwargs.pop('temperature', self.temperature)
 
+        t_start = time.monotonic()
         response = client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -139,6 +143,7 @@ class OpenAIAdapter(LLMAdapter):
             temperature=temperature,
             **kwargs,
         )
+        latency_ms = round((time.monotonic() - t_start) * 1000.0, 2)
 
         text = ''
         if response.choices:
@@ -167,6 +172,8 @@ class OpenAIAdapter(LLMAdapter):
             'text': text,
             'model': self.model,
             'provider': _PROVIDER,
+            'mode': 'chat',
+            'latency_ms': latency_ms,
             'usage': usage,
             'cost': cost,
         }

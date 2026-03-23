@@ -56,21 +56,42 @@ class PerformanceTracker:
 
         # _history[llm][context_type] = deque of (quality_score, weight, cost_usd)
         self._history: dict = defaultdict(lambda: defaultdict(deque))
+        # _failures[llm][context_type] = count of non-success records
+        self._failures: dict = defaultdict(lambda: defaultdict(int))
+        # _latency_ms[llm][context_type] = deque of latency_ms floats
+        self._latency_ms: dict = defaultdict(lambda: defaultdict(deque))
 
     def record(self, llm: str, context_type: str,
-               quality_score: float, cost_usd: float = 0.0) -> None:
+               quality_score: float, cost_usd: float = 0.0,
+               status: str = 'success', latency_ms: float = 0.0) -> None:
         """
-        Record a quality and cost observation for an LLM on a given context type.
+        Record a quality/cost observation for an LLM on a given context type.
 
         Args:
             llm:           LLM identifier (e.g. 'claude', 'codex').
             context_type:  Context dimension (e.g. 'code_generation').
             quality_score: Quality rating for this observation (0.0 – 1.0).
             cost_usd:      Actual cost of this LLM call in USD (default 0.0).
+            status:        Execution status ('success', 'error', 'unavailable').
+                           Records where status != 'success' are not included in
+                           quality or cost history but do increment failure counts.
+            latency_ms:    Wall-clock time for the API call in milliseconds.
+                           Tracked regardless of status.
         """
+        window = self.cfg['history_window']
+
+        # Always track latency (regardless of status)
+        latency_deque = self._latency_ms[llm][context_type]
+        latency_deque.append(max(0.0, float(latency_ms)))
+        if len(latency_deque) > window:
+            latency_deque.popleft()
+
+        if status != 'success':
+            self._failures[llm][context_type] += 1
+            return  # Do not record quality or cost for failed calls
+
         quality_score = max(0.0, min(1.0, quality_score))
         cost_usd = max(0.0, cost_usd)
-        window = self.cfg['history_window']
         bucket = self._history[llm][context_type]
 
         # Decay all existing weights before appending the new observation
@@ -215,12 +236,45 @@ class PerformanceTracker:
         Return a summary dict of recorded observations for an LLM.
 
         Useful for effectiveness review reports.
-        Includes quality statistics and cost-per-quality-unit (ROI metric).
+        Includes quality statistics, cost-per-quality-unit (ROI metric),
+        failure counts, and average latency per context type.
         """
+        # Collect all context types seen (quality history OR failures OR latency)
+        all_contexts = (
+            set(self._history[llm]) | set(self._failures[llm])
+            | set(self._latency_ms[llm])
+        )
+
         result = {}
-        for ctx_type, bucket in self._history[llm].items():
-            if not bucket:
+        for ctx_type in all_contexts:
+            bucket = self._history[llm].get(ctx_type, deque())
+            failure_count = self._failures[llm].get(ctx_type, 0)
+            latency_deque = self._latency_ms[llm].get(ctx_type, deque())
+
+            # Skip context types with no recorded data at all
+            if not bucket and failure_count == 0 and not latency_deque:
                 continue
+
+            mean_latency_ms = (
+                round(sum(latency_deque) / len(latency_deque), 2)
+                if latency_deque else None
+            )
+
+            if not bucket:
+                # Only failures or latency recorded; no quality data yet
+                result[ctx_type] = {
+                    'observations': 0,
+                    'mean_quality': None,
+                    'min_quality': None,
+                    'max_quality': None,
+                    'total_cost_usd': 0.0,
+                    'mean_cost_usd': None,
+                    'cost_per_quality_unit': None,
+                    'failure_count': failure_count,
+                    'mean_latency_ms': mean_latency_ms,
+                }
+                continue
+
             scores = [q for q, _, _ in bucket]
             costs = [c for _, _, c in bucket]
             total_cost = sum(costs)
@@ -237,6 +291,8 @@ class PerformanceTracker:
                 'total_cost_usd': round(total_cost, 6),
                 'mean_cost_usd': round(total_cost / len(costs), 6),
                 'cost_per_quality_unit': cost_per_quality,
+                'failure_count': failure_count,
+                'mean_latency_ms': mean_latency_ms,
             }
         return result
 
@@ -247,7 +303,13 @@ class PerformanceTracker:
         """
         if llm is None:
             self._history.clear()
+            self._failures.clear()
+            self._latency_ms.clear()
         elif context_type is None:
             self._history[llm].clear()
+            self._failures[llm].clear()
+            self._latency_ms[llm].clear()
         else:
             self._history[llm][context_type].clear()
+            self._failures[llm][context_type] = 0
+            self._latency_ms[llm][context_type].clear()
