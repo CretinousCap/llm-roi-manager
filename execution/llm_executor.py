@@ -155,6 +155,18 @@ def _classify_error(exc: Exception) -> str:
     return 'unknown'
 
 
+def _slugify(value: str) -> str:
+    """
+    Return a lowercase, space-free slug suitable for use in stable IDs.
+
+    Strips leading/trailing whitespace, lowercases, and replaces spaces with
+    underscores.  Other characters (e.g. hyphens, dots) are left intact so
+    that names like 'llm-roi-manager' produce the predictable ID
+    'proj_llm-roi-manager'.
+    """
+    return value.strip().lower().replace(' ', '_')
+
+
 def _normalise_billing(metadata: Optional[dict]) -> dict:
     """
     Return a normalised billing dict with stable identifiers and defaults.
@@ -162,8 +174,12 @@ def _normalise_billing(metadata: Optional[dict]) -> dict:
     Accepts both new-style keys (account_id / account_name / project_id /
     project_name) and old-style keys (account / project) for backward
     compatibility.  Old-style keys are promoted:
-      account  → account_name = account,  account_id  = 'acc_{account}'
-      project  → project_name = project,  project_id  = 'proj_{project}'
+      account  → account_name = account,  account_id  = 'acc_{_slugify(account)}'
+      project  → project_name = project,  project_id  = 'proj_{_slugify(project)}'
+
+    When an ID is derived from a name it is slugified (lowercased, spaces →
+    underscores) to keep it consistent and join-safe.  Explicitly supplied
+    account_id / project_id values are used verbatim.
 
     Defaults when keys are absent:
       account_id='acc_unknown', account_name='unknown',
@@ -175,11 +191,11 @@ def _normalise_billing(metadata: Optional[dict]) -> dict:
     if 'account_name' in meta or 'account_id' in meta:
         # New-style: at least one explicit new key present
         account_name = str(meta.get('account_name', 'unknown'))
-        account_id   = str(meta.get('account_id',   f'acc_{account_name}'))
+        account_id   = str(meta.get('account_id',   f'acc_{_slugify(account_name)}'))
     elif 'account' in meta:
         # Old-style: derive both new fields from the legacy key
         account_name = str(meta['account'])
-        account_id   = f'acc_{account_name}'
+        account_id   = f'acc_{_slugify(account_name)}'
     else:
         account_name = 'unknown'
         account_id   = 'acc_unknown'
@@ -188,11 +204,11 @@ def _normalise_billing(metadata: Optional[dict]) -> dict:
     if 'project_name' in meta or 'project_id' in meta:
         # New-style: at least one explicit new key present
         project_name = str(meta.get('project_name', 'default'))
-        project_id   = str(meta.get('project_id',   f'proj_{project_name}'))
+        project_id   = str(meta.get('project_id',   f'proj_{_slugify(project_name)}'))
     elif 'project' in meta:
         # Old-style: derive both new fields from the legacy key
         project_name = str(meta['project'])
-        project_id   = f'proj_{project_name}'
+        project_id   = f'proj_{_slugify(project_name)}'
     else:
         project_name = 'default'
         project_id   = 'proj_default'
