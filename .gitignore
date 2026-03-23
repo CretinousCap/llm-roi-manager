@@ -9,10 +9,10 @@ __pycache__/
 .venv/
 venv/
 env/
-.env
 
 # Secrets / API keys (NEVER commit these)
 .env
+.env.*
 *.key
 *.pem
 secrets.json
@@ -32,9 +32,9 @@ Thumbs.db
 htmlcov/
 *.log
 
-# Session data (exported tracker state — keep local, not in git)
+# Session data
 tracker_state/
 session_logs/
 
-# Result store (JSONL output from run_task.py — keep local, not in git)
+# Result store
 results/
