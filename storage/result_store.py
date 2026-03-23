@@ -137,6 +137,38 @@ class ResultStore:
                     count += 1
         return count
 
+    def load_by_billing_account(self, account: str) -> list:
+        """
+        Return records where the billing account matches the given value.
+
+        Matches against 'account_name' (new-style records) and falls back to
+        'account' (old-style legacy records) so both formats are covered.
+        """
+        result = []
+        for r in self.load_all():
+            billing = r.get('billing', {})
+            if billing.get('account_name') == account:
+                result.append(r)
+            elif billing.get('account') == account:
+                result.append(r)
+        return result
+
+    def load_by_billing_project(self, project: str) -> list:
+        """
+        Return records where the billing project matches the given value.
+
+        Matches against 'project_name' (new-style records) and falls back to
+        'project' (old-style legacy records) so both formats are covered.
+        """
+        result = []
+        for r in self.load_all():
+            billing = r.get('billing', {})
+            if billing.get('project_name') == project:
+                result.append(r)
+            elif billing.get('project') == project:
+                result.append(r)
+        return result
+
     def clear(self) -> None:
         """
         Delete all records. Irreversible — use with caution.

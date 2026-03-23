@@ -40,6 +40,15 @@ TASK = {
     ),
 }
 
+# ── Billing context ───────────────────────────────────────────────────────────
+BILLING_METADATA = {
+    'account_id':   'acc_personal',
+    'account_name': 'personal',
+    'project_id':   'proj_llm-roi-manager',
+    'project_name': 'llm-roi-manager',
+    'environment':  'dev',
+}
+
 # ── LLM wired for this example ────────────────────────────────────────────────
 _ADAPTER_LLM = 'gpt4o_mini'   # must match a key in core/registry.py LLM_REGISTRY
 _OPENAI_MODEL = 'gpt-4o-mini'  # underlying model passed to OpenAI API
@@ -88,7 +97,9 @@ def run(dry_run: bool = False) -> dict:
     # ── 4. Execute ────────────────────────────────────────────────────────────
     if dry_run:
         # Bypass real API call — use a canned response for testing
+        from execution.llm_executor import _normalise_billing
         exec_result = {
+            'status': 'success',
             'text': (
                 'def fib(n, memo={}):\n'
                 '    """Return the nth Fibonacci number with memoization."""\n'
@@ -101,11 +112,17 @@ def run(dry_run: bool = False) -> dict:
             ),
             'model': _OPENAI_MODEL,
             'provider': 'openai',
+            'mode': 'chat',
+            'latency_ms': 0.0,
             'usage': {'input_tokens': 0, 'output_tokens': 0},
             'cost': {'input_usd': 0.0, 'output_usd': 0.0,
                      'tool_usd': 0.0, 'total_usd': 0.0},
+            'error': None,
+            'billing': _normalise_billing(BILLING_METADATA),
             'llm': _ADAPTER_LLM,
             'skipped': False,
+            'tokens_used': 0,
+            'cost_usd': 0.0,
         }
         print(f'[4] Execute   [DRY RUN — no API call made]')
     else:
@@ -123,13 +140,18 @@ def run(dry_run: bool = False) -> dict:
             TASK['description'],
             allocation,
             llm_override=llm_to_use,
+            metadata=BILLING_METADATA,
         )
         cost = exec_result['cost']
         usage = exec_result['usage']
         print(
-            f'[4] Execute   llm={exec_result["llm"]!r}  '
+            f'[4] Execute   status={exec_result["status"]!r}  '
+            f'llm={exec_result["llm"]!r}  '
             f'model={exec_result["model"]!r}  '
             f'provider={exec_result["provider"]!r}'
+        )
+        print(
+            f'    latency   {exec_result["latency_ms"]:.1f} ms'
         )
         print(
             f'    tokens    input={usage["input_tokens"]}  '
@@ -164,6 +186,10 @@ def run(dry_run: bool = False) -> dict:
         'llm': exec_result['llm'],
         'model': exec_result['model'],
         'provider': exec_result['provider'],
+        'status': exec_result['status'],
+        'mode': exec_result['mode'],
+        'latency_ms': exec_result['latency_ms'],
+        'error': exec_result.get('error'),
         'task_description': TASK['description'],
         'context_dominant': context['dominant'],
         'context_confidence': context['confidence'],
@@ -178,10 +204,21 @@ def run(dry_run: bool = False) -> dict:
         'cost_total_usd': cost['total_usd'],
         'quality_score': eval_result['quality_score'],
         'eval_method': eval_result['method'],
+        'billing': exec_result['billing'],
         'dry_run': dry_run,
     }
     store.append(record)
-    print(f'[6] Store     path={store.path}  total_records={store.record_count()}')
+    billing = exec_result['billing']
+    print(
+        f'[6] Store     path={store.path}  total_records={store.record_count()}'
+    )
+    print(
+        f'    billing   account_id={billing["account_id"]!r}  '
+        f'account_name={billing["account_name"]!r}  '
+        f'project_id={billing["project_id"]!r}  '
+        f'project_name={billing["project_name"]!r}  '
+        f'environment={billing["environment"]!r}'
+    )
 
     # ── 7. Update performance tracker ────────────────────────────────────────
     tracker.record(
@@ -189,6 +226,8 @@ def run(dry_run: bool = False) -> dict:
         context_type=context['dominant'],
         quality_score=eval_result['quality_score'],
         cost_usd=exec_result['cost']['total_usd'],
+        status=exec_result.get('status', 'success'),
+        latency_ms=exec_result.get('latency_ms', 0.0),
     )
     summary = tracker.summary(exec_result['llm'])
     ctx = context['dominant']
