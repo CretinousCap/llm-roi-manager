@@ -42,9 +42,11 @@ TASK = {
 
 # ── Billing context ───────────────────────────────────────────────────────────
 BILLING_METADATA = {
-    'account':     'personal',
-    'project':     'llm-roi-manager',
-    'environment': 'dev',
+    'account_id':   'acc_personal',
+    'account_name': 'personal',
+    'project_id':   'proj_llm-roi-manager',
+    'project_name': 'llm-roi-manager',
+    'environment':  'dev',
 }
 
 # ── LLM wired for this example ────────────────────────────────────────────────
@@ -95,6 +97,7 @@ def run(dry_run: bool = False) -> dict:
     # ── 4. Execute ────────────────────────────────────────────────────────────
     if dry_run:
         # Bypass real API call — use a canned response for testing
+        from execution.llm_executor import _normalise_billing
         exec_result = {
             'status': 'success',
             'text': (
@@ -115,11 +118,7 @@ def run(dry_run: bool = False) -> dict:
             'cost': {'input_usd': 0.0, 'output_usd': 0.0,
                      'tool_usd': 0.0, 'total_usd': 0.0},
             'error': None,
-            'billing': {
-                'account': BILLING_METADATA['account'],
-                'project': BILLING_METADATA['project'],
-                'environment': BILLING_METADATA['environment'],
-            },
+            'billing': _normalise_billing(BILLING_METADATA),
             'llm': _ADAPTER_LLM,
             'skipped': False,
             'tokens_used': 0,
@@ -214,8 +213,10 @@ def run(dry_run: bool = False) -> dict:
         f'[6] Store     path={store.path}  total_records={store.record_count()}'
     )
     print(
-        f'    billing   account={billing["account"]!r}  '
-        f'project={billing["project"]!r}  '
+        f'    billing   account_id={billing["account_id"]!r}  '
+        f'account_name={billing["account_name"]!r}  '
+        f'project_id={billing["project_id"]!r}  '
+        f'project_name={billing["project_name"]!r}  '
         f'environment={billing["environment"]!r}'
     )
 

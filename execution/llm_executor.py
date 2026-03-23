@@ -39,7 +39,13 @@ STANDARDISED RESULT FORMAT:
                    'tool_usd': float, 'total_usd': float},
     'text':       str,
     'error':      {'type': str, 'message': str} | None,
-    'billing':    {'account': str, 'project': str, 'environment': str},
+    'billing':    {
+                    'account_id':   str,   # stable identifier, e.g. 'acc_personal'
+                    'account_name': str,   # human-readable name, e.g. 'personal'
+                    'project_id':   str,   # stable identifier, e.g. 'proj_llm-roi'
+                    'project_name': str,   # human-readable name, e.g. 'llm-roi'
+                    'environment':  str,   # 'dev' | 'test' | 'prod'
+                  },
     # Backward-compat aliases (kept for now):
     'llm':        str,
     'skipped':    bool,
@@ -48,14 +54,26 @@ STANDARDISED RESULT FORMAT:
   }
 
 BILLING CONTEXT (metadata parameter):
-  Pass an optional metadata dict to execute() to attach billing information:
+  Pass an optional metadata dict to execute() to attach billing information.
+  New-style keys (preferred):
     metadata = {
-        'account':     'personal | company_name',
-        'project':     'project_name',
-        'environment': 'dev | test | prod',
+        'account_id':   'acc_personal',    # stable identifier
+        'account_name': 'personal',        # human-readable name
+        'project_id':   'proj_llm-roi',    # stable identifier
+        'project_name': 'llm-roi-manager', # human-readable name
+        'environment':  'dev | test | prod',
     }
-  Any missing key defaults to: account='unknown', project='default',
-  environment='dev'. Omit metadata entirely for the same defaults.
+  Old-style keys (still accepted for backward compatibility):
+    metadata = {
+        'account':     'personal',         # → account_name='personal',
+                                           #   account_id='acc_personal'
+        'project':     'llm-roi-manager',  # → project_name='llm-roi-manager',
+                                           #   project_id='proj_llm-roi-manager'
+        'environment': 'dev',
+    }
+  Missing metadata (or missing individual keys) defaults to:
+    account_id='acc_unknown', account_name='unknown',
+    project_id='proj_default', project_name='default', environment='dev'.
 
 ERROR CLASSIFICATION:
   All adapter exceptions are caught and classified via safe string matching
@@ -76,7 +94,8 @@ USAGE:
   result = executor.execute(
       prompt='Write a sort function in Python.',
       allocation={'preferred_llm': 'claude', 'token_budget': 2000},
-      metadata={'account': 'personal', 'project': 'my-project',
+      metadata={'account_id': 'acc_personal', 'account_name': 'personal',
+                'project_id': 'proj_llm-roi', 'project_name': 'llm-roi-manager',
                 'environment': 'dev'},
   )
   # result: {
@@ -87,7 +106,8 @@ USAGE:
   #   'cost': {'input_usd': 0.00036, 'output_usd': 0.00288,
   #            'tool_usd': 0.0, 'total_usd': 0.00324},
   #   'error': None,
-  #   'billing': {'account': 'personal', 'project': 'my-project',
+  #   'billing': {'account_id': 'acc_personal', 'account_name': 'personal',
+  #               'project_id': 'proj_llm-roi', 'project_name': 'llm-roi-manager',
   #               'environment': 'dev'},
   #   'llm': 'claude', 'skipped': False,
   #   'tokens_used': 312, 'cost_usd': 0.00324,
@@ -136,12 +156,53 @@ def _classify_error(exc: Exception) -> str:
 
 
 def _normalise_billing(metadata: Optional[dict]) -> dict:
-    """Return a normalised billing dict with defaults applied for missing keys."""
+    """
+    Return a normalised billing dict with stable identifiers and defaults.
+
+    Accepts both new-style keys (account_id / account_name / project_id /
+    project_name) and old-style keys (account / project) for backward
+    compatibility.  Old-style keys are promoted:
+      account  → account_name = account,  account_id  = 'acc_{account}'
+      project  → project_name = project,  project_id  = 'proj_{project}'
+
+    Defaults when keys are absent:
+      account_id='acc_unknown', account_name='unknown',
+      project_id='proj_default', project_name='default', environment='dev'.
+    """
     meta = metadata or {}
+
+    # ── Account fields ────────────────────────────────────────────────────────
+    if 'account_name' in meta or 'account_id' in meta:
+        # New-style: at least one explicit new key present
+        account_name = str(meta.get('account_name', 'unknown'))
+        account_id   = str(meta.get('account_id',   f'acc_{account_name}'))
+    elif 'account' in meta:
+        # Old-style: derive both new fields from the legacy key
+        account_name = str(meta['account'])
+        account_id   = f'acc_{account_name}'
+    else:
+        account_name = 'unknown'
+        account_id   = 'acc_unknown'
+
+    # ── Project fields ────────────────────────────────────────────────────────
+    if 'project_name' in meta or 'project_id' in meta:
+        # New-style: at least one explicit new key present
+        project_name = str(meta.get('project_name', 'default'))
+        project_id   = str(meta.get('project_id',   f'proj_{project_name}'))
+    elif 'project' in meta:
+        # Old-style: derive both new fields from the legacy key
+        project_name = str(meta['project'])
+        project_id   = f'proj_{project_name}'
+    else:
+        project_name = 'default'
+        project_id   = 'proj_default'
+
     return {
-        'account':     str(meta.get('account', 'unknown')),
-        'project':     str(meta.get('project', 'default')),
-        'environment': str(meta.get('environment', 'dev')),
+        'account_id':   account_id,
+        'account_name': account_name,
+        'project_id':   project_id,
+        'project_name': project_name,
+        'environment':  str(meta.get('environment', 'dev')),
     }
 
 
@@ -192,7 +253,8 @@ class LLMExecutor:
         result = executor.execute(
             prompt='Explain gradient descent.',
             allocation={'preferred_llm': 'claude', 'token_budget': 1500},
-            metadata={'account': 'personal', 'project': 'my-project',
+            metadata={'account_id': 'acc_personal', 'account_name': 'personal',
+                      'project_id': 'proj_llm-roi', 'project_name': 'llm-roi-manager',
                       'environment': 'dev'},
         )
     """
@@ -230,8 +292,11 @@ class LLMExecutor:
                           'preferred_llm' and 'token_budget'.
             llm_override: Force a specific LLM regardless of allocation.
             metadata:     Optional billing context dict. Accepted keys:
-                            account     (default 'unknown')
-                            project     (default 'default')
+                            New-style (preferred):
+                              account_id, account_name, project_id, project_name
+                            Old-style (backward-compat):
+                              account  → account_name + account_id derived
+                              project  → project_name + project_id derived
                             environment (default 'dev')
                           Unrecognised keys are silently ignored.
             **kwargs:     Passed through to the adapter's complete() call.
@@ -248,7 +313,9 @@ class LLMExecutor:
                            'tool_usd': float, 'total_usd': float}
               text:       str
               error:      {'type': str, 'message': str} or None
-              billing:    {'account': str, 'project': str, 'environment': str}
+              billing:    {'account_id': str, 'account_name': str,
+                           'project_id': str, 'project_name': str,
+                           'environment': str}
               # Backward-compat aliases:
               llm:        str
               skipped:    bool
