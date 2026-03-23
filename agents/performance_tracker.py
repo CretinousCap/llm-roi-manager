@@ -173,13 +173,21 @@ class PerformanceTracker:
 
         avg_cost_usd = total_cost / total_observations
 
-        # Look up registry reference cost (per call, estimated at 1k tokens)
+        # Look up reference cost from models registry via the model_key in
+        # core registry. Falls back to 0.0 (no penalty) if not configured.
         try:
-            from core.registry import LLM_REGISTRY
-            ref_cost_per_1k = LLM_REGISTRY.get(llm, {}).get(
-                'cost_per_1k_tokens', 0.0
-            )
-        except Exception:
+            from core.registry import LLM_REGISTRY as ROUTING_REGISTRY
+            from models.registry import LLM_REGISTRY as MODELS_REGISTRY
+            model_key = ROUTING_REGISTRY.get(llm, {}).get('model_key', '')
+            ref_cost_per_1k = 0.0
+            if model_key and model_key in MODELS_REGISTRY:
+                m = MODELS_REGISTRY[model_key]
+                # Blended estimate: average of input and output pricing.
+                ref_cost_per_1k = (
+                    m.get('input_price_per_1k', 0.0)
+                    + m.get('output_price_per_1k', 0.0)
+                ) / 2.0
+        except (ImportError, KeyError, TypeError):
             ref_cost_per_1k = 0.0
 
         if ref_cost_per_1k <= 0.0:

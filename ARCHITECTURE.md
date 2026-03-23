@@ -77,11 +77,16 @@ Task Description
 ```
 llm-roi-manager/
 │
+├── models/
+│   ├── __init__.py             # Exports LLM_REGISTRY, calculate_cost
+│   ├── registry.py             # MODELS_REGISTRY — pricing + capabilities per "provider:model"
+│   └── pricing.py              # calculate_cost(model_key, usage) → cost breakdown
+│
 ├── core/
 │   ├── __init__.py             # TASK_DEFAULTS, SESSION_DEFAULTS, BUDGET_DEFAULTS,
 │   │                           # EXECUTOR_DEFAULTS, EVALUATOR_DEFAULTS, STORE_DEFAULTS
 │   ├── session.py              # WrapSession + IterationGuard
-│   └── registry.py             # LLM_REGISTRY
+│   └── registry.py             # LLM_REGISTRY — routing agents (links to models/ via model_key)
 │
 ├── classifiers/
 │   └── task_classifier.py      # classify(task) → context_scores
@@ -96,7 +101,8 @@ llm-roi-manager/
 │   └── token_allocator.py      # allocate(context, recommendation) → token_budget
 │
 ├── execution/
-│   └── llm_executor.py         # LLMAdapter ABC + LLMExecutor dispatcher
+│   ├── llm_executor.py         # LLMAdapter ABC + LLMExecutor dispatcher
+│   └── openai_adapter.py       # Concrete OpenAI adapter (gpt-4o-mini, gpt-4o, …)
 │
 ├── evaluation/
 │   └── evaluator.py            # Evaluator — LLM-as-judge + heuristic fallback
@@ -162,13 +168,98 @@ context_score['code_generation'] = +0.1  (ambiguous)
 
 ---
 
+## Models Registry and Pricing Engine (v0.3.0)
+
+### Why a Centralised Registry?
+
+Pricing figures scattered across adapter files create drift: the adapter says
+one cost, the router uses a different reference, and the ROI engine compares
+against a third stale number. The models registry is the **single source of
+truth**. Every cost calculation reads from it; no prices are hardcoded
+elsewhere.
+
+### `models/registry.py` — LLM_REGISTRY
+
+Keyed by `"provider:model"` (e.g. `"openai:gpt-4o-mini"`). Each entry carries:
+
+```python
+'openai:gpt-4o-mini': {
+    'provider': 'openai',
+    'model': 'gpt-4o-mini',
+    'input_price_per_1k': 0.000150,   # USD per 1 000 input tokens
+    'output_price_per_1k': 0.000600,  # USD per 1 000 output tokens
+    'context_window': 128_000,
+    'capabilities': ['chat', 'code', 'reasoning', 'json'],
+    'type': 'text',
+    'notes': 'Fast, cheap, capable; recommended default.',
+}
+```
+
+Helper functions: `get_model(model_key)`, `list_models(provider=None)`.
+
+### `models/pricing.py` — calculate_cost()
+
+```python
+from models.pricing import calculate_cost
+
+cost = calculate_cost(
+    model_key='openai:gpt-4o-mini',
+    usage={'input_tokens': 500, 'output_tokens': 300},
+)
+# → {'input_usd': 7.5e-05, 'output_usd': 0.00018,
+#    'tool_usd': 0.0, 'total_usd': 0.000255}
+```
+
+Properties:
+- **Deterministic** — same inputs, same output, always.
+- **Side-effect free** — no I/O, no state mutation.
+- **Explicit** — every component is named in the returned dict.
+- **Raises KeyError** for unknown models (no silent fallback).
+
+### How the Routing Registry Links to the Models Registry
+
+`core/registry.py` still drives routing decisions. Each routing entry now
+carries a `model_key` pointing to the `models/registry.py` entry:
+
+```
+core/registry.py              models/registry.py
+─────────────────────         ─────────────────────────────
+'gpt4o_mini':                 'openai:gpt-4o-mini':
+  model_key: 'openai:gpt-4o-mini'  ← links here
+  context_affinity: 'neutral'
+  default_weight: 1.0
+```
+
+`token_allocator` uses `model_key` to look up a blended pre-call cost
+estimate (average of input and output pricing). `performance_tracker`'s
+`roi_score()` uses the same path for the reference cost used in the ROI
+penalty calculation.
+
+---
+
 ## Adding a New LLM
 
-1. Create `agents/your_llm.py`
-2. Implement `score(task: dict) -> float` (returns -1 to +1)
-3. Add to `LLM_REGISTRY` in `core/registry.py`
-4. The router picks it up automatically — no changes to router core
-5. Update `CHANGELOG.md`
+1. **Add pricing** in `models/registry.py`:
+
+   ```python
+   'myprovider:my-model': {
+       'provider': 'myprovider',
+       'model': 'my-model',
+       'input_price_per_1k': 0.001,    # USD per 1 000 input tokens
+       'output_price_per_1k': 0.002,   # USD per 1 000 output tokens
+       'context_window': 32_768,
+       'capabilities': ['chat', 'code'],
+       'type': 'text',
+       'notes': 'Optional description.',
+   }
+   ```
+
+2. Create `agents/your_llm.py`
+3. Implement `score(task: dict) -> float` (returns -1 to +1)
+4. Add a routing entry to `LLM_REGISTRY` in `core/registry.py`, setting
+   `model_key` to the `"provider:model"` key from step 1.
+5. The router picks it up automatically — no changes to router core
+6. Update `CHANGELOG.md`
 
 **Planned LLM agents:**
 - `agents/claude.py` — strong on reasoning, code review, long context
@@ -209,6 +300,7 @@ Analogous to the quarterly review in HybridQuant's SOP.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.3.0 | 2026-03 | Models registry + pricing engine; structured cost output; no hardcoded pricing |
 | v0.2.0 | 2026-03 | Execution layer, LLM-as-judge evaluator, JSONL result store, ROI engine |
 | v0.1.0 | 2026-03 | Initial multi-agent skeleton ported from HybridQuant patterns |
 

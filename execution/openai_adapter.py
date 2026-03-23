@@ -11,8 +11,8 @@ SUPPORTED MODELS:
   - 'gpt-4o'                — highest capability, higher cost
   - 'gpt-3.5-turbo'        — legacy, cheapest option
 
-  Cost table (_COST_PER_1K_TOKENS below) covers blended input+output pricing.
-  Update figures from https://openai.com/pricing during effectiveness reviews.
+  Pricing is read from models/registry.py — there are no hardcoded figures
+  in this file. Update pricing by editing models/registry.py only.
 
 USAGE:
   from execution.openai_adapter import OpenAIAdapter
@@ -23,7 +23,16 @@ USAGE:
   executor.register('gpt4o',      OpenAIAdapter('gpt-4o'))
 
   result = executor.execute(prompt, allocation)
-  # result: {'text': '...', 'tokens_used': int, 'cost_usd': float, ...}
+  # result: {
+  #   'text': '...',
+  #   'model': 'gpt-4o-mini',
+  #   'provider': 'openai',
+  #   'usage': {'input_tokens': int, 'output_tokens': int},
+  #   'cost': {'input_usd': float, 'output_usd': float,
+  #            'tool_usd': float, 'total_usd': float},
+  #   'llm': 'gpt4o_mini',
+  #   'skipped': False,
+  # }
 
 ENVIRONMENT:
   OPENAI_API_KEY  — required; your OpenAI secret key (sk-...)
@@ -36,13 +45,14 @@ import os
 
 from execution.llm_executor import LLMAdapter
 
-# ── Per-model blended cost (input + output) in USD per 1,000 tokens ──────────
-# Update from https://openai.com/pricing during scheduled effectiveness reviews.
-# Figures are blended estimates assuming roughly equal prompt and completion.
-_COST_PER_1K_TOKENS: dict = {
-    'gpt-4o-mini':   0.0003,   # $0.15/1M input + $0.60/1M output → ~$0.30/1M blended
-    'gpt-4o':        0.00625,  # $2.50/1M input + $10.00/1M output → ~$6.25/1M blended
-    'gpt-3.5-turbo': 0.00075,  # $0.50/1M input + $1.50/1M output  → ~$0.75/1M blended
+_PROVIDER = 'openai'
+
+# Maps OpenAI model names to their "provider:model" keys in models/registry.py.
+# Add new models here when they are added to the models registry.
+_MODEL_KEYS: dict = {
+    'gpt-4o-mini':   'openai:gpt-4o-mini',
+    'gpt-4o':        'openai:gpt-4o',
+    'gpt-3.5-turbo': 'openai:gpt-3.5-turbo',
 }
 
 _DEFAULT_MODEL = 'gpt-4o-mini'
@@ -104,10 +114,15 @@ class OpenAIAdapter(LLMAdapter):
 
         Returns:
             dict with:
-              text:        str — generated text
-              tokens_used: int — total tokens consumed (prompt + completion)
-              cost_usd:    float — estimated cost for this call
+              text:     str   — generated text
+              model:    str   — model name used (e.g. 'gpt-4o-mini')
+              provider: str   — provider identifier ('openai')
+              usage:    dict  — {'input_tokens': int, 'output_tokens': int}
+              cost:     dict  — {'input_usd': float, 'output_usd': float,
+                                  'tool_usd': float, 'total_usd': float}
         """
+        from models.pricing import calculate_cost
+
         client = self._get_client()
 
         messages = []
@@ -129,15 +144,30 @@ class OpenAIAdapter(LLMAdapter):
         if response.choices:
             text = response.choices[0].message.content or ''
 
-        tokens_used = 0
+        input_tokens = 0
+        output_tokens = 0
         if response.usage:
-            tokens_used = response.usage.total_tokens
+            input_tokens = response.usage.prompt_tokens or 0
+            output_tokens = response.usage.completion_tokens or 0
 
-        cost_per_1k = _COST_PER_1K_TOKENS.get(self.model, 0.002)
-        cost_usd = round((tokens_used / 1_000.0) * cost_per_1k, 6)
+        usage = {
+            'input_tokens': input_tokens,
+            'output_tokens': output_tokens,
+        }
+
+        model_key = _MODEL_KEYS.get(self.model, '')
+        if model_key:
+            cost = calculate_cost(model_key, usage)
+        else:
+            # Unknown model: return zero cost rather than silently fail.
+            cost = {'input_usd': 0.0, 'output_usd': 0.0,
+                    'tool_usd': 0.0, 'total_usd': 0.0}
 
         return {
             'text': text,
-            'tokens_used': tokens_used,
-            'cost_usd': cost_usd,
+            'model': self.model,
+            'provider': _PROVIDER,
+            'usage': usage,
+            'cost': cost,
         }
+

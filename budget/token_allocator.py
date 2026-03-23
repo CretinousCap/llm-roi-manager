@@ -74,9 +74,23 @@ def allocate(context: dict, recommendation: dict,
     )
 
     # ── Estimate cost ─────────────────────────────────────────────────────────
+    # Look up blended cost from models registry via the routing entry's model_key.
     cost_per_1k = 0.0
     if preferred_llm in LLM_REGISTRY:
-        cost_per_1k = LLM_REGISTRY[preferred_llm].get('cost_per_1k_tokens', 0.0)
+        model_key = LLM_REGISTRY[preferred_llm].get('model_key', '')
+        if model_key:
+            try:
+                from models.registry import LLM_REGISTRY as MODELS_REGISTRY
+                m = MODELS_REGISTRY.get(model_key, {})
+                if m:
+                    # Blended estimate: average of input and output pricing.
+                    # Actual split is unknown at allocation time.
+                    cost_per_1k = (
+                        m.get('input_price_per_1k', 0.0)
+                        + m.get('output_price_per_1k', 0.0)
+                    ) / 2.0
+            except (ImportError, KeyError, TypeError):
+                pass  # Models registry unavailable — estimate at zero
     estimated_cost_usd = (token_budget / 1000.0) * cost_per_1k
 
     return {
