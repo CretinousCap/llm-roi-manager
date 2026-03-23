@@ -26,7 +26,7 @@ HOW IT WORKS:
   2. Count keyword density per context dimension
   3. Compute a raw score per dimension (positive = strong signal)
   4. Smooth with EMA if previous context scores are passed (optional)
-  5. Return context_scores dict + overall confidence
+  5. Return context_scores dict + overall confidence + structured task profile
 
 TUNING:
   The primary tuning lever is the keyword vocabulary (_VOCAB dict below).
@@ -64,6 +64,77 @@ _VOCAB: dict = {
     ],
 }
 
+# ── Profile heuristic keyword lists ───────────────────────────────────────────
+
+# task_type
+_TASK_TYPE_EDIT_KW = {
+    'refactor', 'fix', 'debug', 'edit', 'update', 'change', 'correct',
+    'revise', 'improve', 'adjust', 'rewrite', 'modify',
+}
+_TASK_TYPE_ANALYSIS_KW = {
+    'analyse', 'analyze', 'evaluate', 'review', 'compare', 'assess',
+    'understand', 'investigate', 'inspect', 'examine', 'audit',
+}
+_TASK_TYPE_PLANNING_KW = {
+    'plan', 'design', 'outline', 'strategy', 'roadmap', 'architect',
+    'structure', 'blueprint', 'schema', 'spec', 'specification',
+}
+_TASK_TYPE_TRANSFORMATION_KW = {
+    'convert', 'transform', 'translate', 'migrate', 'reformat',
+    'port', 'transcribe', 'reshape',
+}
+
+# complexity
+_COMPLEXITY_HIGH_KW = {
+    'complex', 'advanced', 'large', 'enterprise', 'distributed', 'optimise',
+    'optimize', 'production', 'scalable', 'concurrent', 'multithreaded',
+    'microservice', 'architecture',
+}
+_COMPLEXITY_LOW_KW = {
+    'simple', 'basic', 'short', 'quick', 'minimal', 'small', 'brief',
+    'trivial', 'straightforward',
+}
+
+# interaction_stage
+_STAGE_REFINEMENT_KW = {
+    'improve', 'refine', 'revise', 'fix', 'change', 'adjust', 'better',
+    'update', 'rework', 'tweak',
+}
+_STAGE_FOLLOWUP_KW = {
+    'also', 'additionally', 'next', 'then', 'continue', 'follow',
+    'furthermore', 'moreover', 'in addition',
+}
+
+# structure
+_STRUCTURE_ITERATIVE_KW = {
+    'iterative', 'loop', 'repeated', 'step by step', 'each step',
+    'incremental', 'iterate',
+}
+_STRUCTURE_MULTI_KW = {
+    'multiple', 'several', 'list of', 'sections', 'parts', 'steps',
+    'items', 'components', 'modules',
+}
+
+# latency_sensitivity
+_LATENCY_HIGH_KW = {
+    'immediately', 'real-time', 'realtime', 'live', 'instant', 'instantly',
+    'fast', 'urgent', 'asap', 'now',
+}
+
+# risk
+_RISK_HIGH_KW = {
+    'production', 'deploy', 'deployment', 'database', 'security', 'auth',
+    'authentication', 'payment', 'critical', 'sensitive', 'finance',
+    'financial', 'compliance', 'gdpr', 'pii',
+}
+
+# Modality derived from dominant context dimension
+_MODALITY_MAP: dict = {
+    'code_generation': 'code',
+    'content_writing': 'text',
+    'data_analysis': 'analysis',
+}
+
 
 def classify(task: dict, config: dict = None,
              history: list = None) -> dict:
@@ -88,6 +159,10 @@ def classify(task: dict, config: dict = None,
           dominant:        name of the highest-scoring dimension
           confidence:      abs(dominant_score), 0.0 – 1.0
           raw_hits:        {'code_generation': int, ...}  keyword match counts
+          profile:         structured task profile dict with keys:
+                             modality, task_type, complexity,
+                             interaction_stage, structure,
+                             latency_sensitivity, risk
     """
     from core import TASK_DEFAULTS
     cfg = {**TASK_DEFAULTS, **(config or {})}
@@ -139,9 +214,86 @@ def classify(task: dict, config: dict = None,
     dominant = max(context_scores, key=lambda d: context_scores[d])
     confidence = abs(context_scores[dominant])
 
+    # ── Step 6: Build structured task profile ────────────────────────────────
+    profile = _build_profile(text, dominant)
+
     return {
         'context_scores': context_scores,
         'dominant': dominant,
         'confidence': round(confidence, 4),
         'raw_hits': raw_hits,
+        'profile': profile,
+    }
+
+
+# ── Profile builder ───────────────────────────────────────────────────────────
+
+def _build_profile(text: str, dominant: str) -> dict:
+    """
+    Derive a structured task profile from the lowercased task text and
+    the dominant context dimension. Uses keyword heuristics only — no LLM calls.
+
+    Args:
+        text:     Lowercased concatenation of description + type_hint.
+        dominant: Winning context dimension from the classifier.
+
+    Returns:
+        dict with keys: modality, task_type, complexity, interaction_stage,
+                        structure, latency_sensitivity, risk.
+    """
+    # modality
+    modality = _MODALITY_MAP.get(dominant, 'text')
+
+    # task_type — first match wins in priority order
+    if any(kw in text for kw in _TASK_TYPE_ANALYSIS_KW):
+        task_type = 'analysis'
+    elif any(kw in text for kw in _TASK_TYPE_PLANNING_KW):
+        task_type = 'planning'
+    elif any(kw in text for kw in _TASK_TYPE_TRANSFORMATION_KW):
+        task_type = 'transformation'
+    elif any(kw in text for kw in _TASK_TYPE_EDIT_KW):
+        task_type = 'edit'
+    else:
+        task_type = 'generation'
+
+    # complexity
+    if any(kw in text for kw in _COMPLEXITY_HIGH_KW):
+        complexity = 'high'
+    elif any(kw in text for kw in _COMPLEXITY_LOW_KW):
+        complexity = 'low'
+    else:
+        complexity = 'medium'
+
+    # interaction_stage
+    if any(kw in text for kw in _STAGE_FOLLOWUP_KW):
+        interaction_stage = 'followup'
+    elif any(kw in text for kw in _STAGE_REFINEMENT_KW):
+        interaction_stage = 'refinement'
+    else:
+        interaction_stage = 'initial'
+
+    # structure
+    if any(kw in text for kw in _STRUCTURE_ITERATIVE_KW):
+        structure = 'iterative'
+    elif any(kw in text for kw in _STRUCTURE_MULTI_KW):
+        structure = 'multi_block'
+    else:
+        structure = 'single_output'
+
+    # latency_sensitivity
+    latency_sensitivity = (
+        'high' if any(kw in text for kw in _LATENCY_HIGH_KW) else 'low'
+    )
+
+    # risk
+    risk = 'high' if any(kw in text for kw in _RISK_HIGH_KW) else 'low'
+
+    return {
+        'modality': modality,
+        'task_type': task_type,
+        'complexity': complexity,
+        'interaction_stage': interaction_stage,
+        'structure': structure,
+        'latency_sensitivity': latency_sensitivity,
+        'risk': risk,
     }

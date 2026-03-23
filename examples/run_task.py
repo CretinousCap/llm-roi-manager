@@ -73,9 +73,19 @@ def run(dry_run: bool = False) -> dict:
     """
     # ── 1. Classify the task ──────────────────────────────────────────────────
     context = classify(TASK)
+    profile = context['profile']
     print(
         f'[1] Classify  dominant={context["dominant"]!r}  '
         f'confidence={context["confidence"]}'
+    )
+    print(
+        f'    profile   modality={profile["modality"]!r}  '
+        f'task_type={profile["task_type"]!r}  '
+        f'complexity={profile["complexity"]!r}  '
+        f'interaction_stage={profile["interaction_stage"]!r}  '
+        f'structure={profile["structure"]!r}  '
+        f'latency_sensitivity={profile["latency_sensitivity"]!r}  '
+        f'risk={profile["risk"]!r}'
     )
 
     # ── 2. Route to best LLM (ROI-aware) ─────────────────────────────────────
@@ -172,10 +182,17 @@ def run(dry_run: bool = False) -> dict:
     #   evaluator = Evaluator(judge_adapter=OpenAIAdapter(model='gpt-4o'))
     evaluator = Evaluator()
     eval_result = evaluator.evaluate(TASK, exec_result['text'], context)
+    dims = eval_result['dimensions']
     print(
         f'[5] Evaluate  quality_score={eval_result["quality_score"]}  '
         f'method={eval_result["method"]!r}  '
         f'confidence={eval_result["confidence"]}'
+    )
+    print(
+        f'    dimensions  correctness={dims["correctness"]}  '
+        f'clarity={dims["clarity"]}  '
+        f'completeness={dims["completeness"]}  '
+        f'efficiency={dims["efficiency"]}'
     )
 
     # ── 6. Store result ───────────────────────────────────────────────────────
@@ -193,6 +210,7 @@ def run(dry_run: bool = False) -> dict:
         'task_description': TASK['description'],
         'context_dominant': context['dominant'],
         'context_confidence': context['confidence'],
+        'task_profile': context['profile'],
         'router_preferred': preferred,
         'router_confidence': recommendation['confidence'],
         'token_budget': allocation['token_budget'],
@@ -203,6 +221,7 @@ def run(dry_run: bool = False) -> dict:
         'cost_tool_usd': cost['tool_usd'],
         'cost_total_usd': cost['total_usd'],
         'quality_score': eval_result['quality_score'],
+        'eval_dimensions': dims,
         'eval_method': eval_result['method'],
         'billing': exec_result['billing'],
         'dry_run': dry_run,
