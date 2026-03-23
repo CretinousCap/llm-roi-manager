@@ -11,6 +11,72 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added — Models Registry and Pricing Engine (v0.3.0)
+
+- `models/registry.py`: Central `LLM_REGISTRY` keyed by `"provider:model"`.
+  Each entry declares `input_price_per_1k`, `output_price_per_1k`,
+  `context_window`, `capabilities`, and `type`. Seeded with:
+  `openai:gpt-4o-mini`, `openai:gpt-4o`, `openai:gpt-3.5-turbo`,
+  `xai:grok-4.20-reasoning`, `google:gemini-pro`, `mistral:mixtral`.
+  Helper functions: `get_model()`, `list_models()`.
+
+- `models/pricing.py`: `calculate_cost(model_key, usage, tools=None) → dict`.
+  Reads pricing exclusively from `models/registry.py`. Returns a fully
+  itemised cost breakdown: `input_usd`, `output_usd`, `tool_usd`, `total_usd`.
+  Raises `KeyError` for unknown models. Deterministic and side-effect free.
+
+- `models/__init__.py`: Exports `LLM_REGISTRY` and `calculate_cost`.
+
+### Changed — v0.3.0
+
+- `execution/openai_adapter.py`: Removed `_COST_PER_1K_TOKENS` hardcoded dict.
+  Now calls `calculate_cost()` from `models/pricing.py` using per-call
+  `prompt_tokens` and `completion_tokens` from the OpenAI API response.
+  Returns structured `usage` dict (`input_tokens`, `output_tokens`) and
+  `cost` dict (`input_usd`, `output_usd`, `tool_usd`, `total_usd`) alongside
+  `text`, `model`, and `provider`. Provider identity is now explicit.
+
+- `execution/llm_executor.py`: Updated `LLMAdapter.complete()` contract and
+  `LLMExecutor.execute()` return signature to match the new structured format.
+  Both `usage` and `cost` dicts are passed through from adapters intact.
+
+- `core/registry.py`: Replaced `cost_per_1k_tokens` with `model_key` in each
+  routing entry. `model_key` is a `"provider:model"` reference into
+  `models/registry.py`. This decouples routing configuration from pricing.
+
+- `budget/token_allocator.py`: Cost estimation now reads from `models/registry.py`
+  via the routing entry's `model_key`. Pre-call estimate uses the average of
+  `input_price_per_1k` and `output_price_per_1k` (token split unknown at
+  allocation time).
+
+- `agents/performance_tracker.py`: `roi_score()` now reads reference cost from
+  `models/registry.py` (via routing entry's `model_key`) instead of from
+  `core/registry.py`. Blended cost reference is consistent with allocator.
+
+- `examples/run_task.py`: Updated dry-run payload and print statements to
+  reflect the new structured `usage` and `cost` dicts. Cost breakdown is now
+  shown per component (input, output, total). Record stored to JSONL includes
+  `model`, `provider`, `input_tokens`, `output_tokens`, and itemised cost fields.
+
+### Architecture Decisions — v0.3.0
+
+- **Single source of truth for pricing**: All USD figures live in
+  `models/registry.py`. Adapters call `calculate_cost()`; they do not define
+  costs.
+- **Separate input/output prices**: The registry records input and output prices
+  separately (matching how providers bill). Pre-call estimates blend them;
+  post-call actuals use the exact split from the API response.
+- **Explicit provider identity**: Every execution result now carries `model`
+  and `provider` fields so downstream consumers (evaluator, store, tracker)
+  can route or filter by provider without parsing strings.
+- **Graceful degradation**: LLMs without a `model_key` (e.g. placeholder
+  entries) produce `0.0` cost estimates instead of raising errors, keeping
+  the pipeline runnable during incremental provider onboarding.
+
+---
+
+## [Unreleased]
+
 ### Added — Execution, Evaluation, and ROI Loop (v0.2.0)
 
 - `execution/llm_executor.py`: `LLMAdapter` abstract base class + `LLMExecutor`

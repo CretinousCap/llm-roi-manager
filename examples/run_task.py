@@ -41,7 +41,7 @@ TASK = {
 }
 
 # ── LLM wired for this example ────────────────────────────────────────────────
-_ADAPTER_LLM = 'gpt4o_mini'   # must match a key in LLM_REGISTRY
+_ADAPTER_LLM = 'gpt4o_mini'   # must match a key in core/registry.py LLM_REGISTRY
 _OPENAI_MODEL = 'gpt-4o-mini'  # underlying model passed to OpenAI API
 
 
@@ -99,8 +99,11 @@ def run(dry_run: bool = False) -> dict:
                 '    memo[n] = fib(n - 1, memo) + fib(n - 2, memo)\n'
                 '    return memo[n]\n'
             ),
-            'tokens_used': 0,
-            'cost_usd': 0.0,
+            'model': _OPENAI_MODEL,
+            'provider': 'openai',
+            'usage': {'input_tokens': 0, 'output_tokens': 0},
+            'cost': {'input_usd': 0.0, 'output_usd': 0.0,
+                     'tool_usd': 0.0, 'total_usd': 0.0},
             'llm': _ADAPTER_LLM,
             'skipped': False,
         }
@@ -121,10 +124,21 @@ def run(dry_run: bool = False) -> dict:
             allocation,
             llm_override=llm_to_use,
         )
+        cost = exec_result['cost']
+        usage = exec_result['usage']
         print(
             f'[4] Execute   llm={exec_result["llm"]!r}  '
-            f'tokens={exec_result["tokens_used"]}  '
-            f'cost=${exec_result["cost_usd"]:.6f}'
+            f'model={exec_result["model"]!r}  '
+            f'provider={exec_result["provider"]!r}'
+        )
+        print(
+            f'    tokens    input={usage["input_tokens"]}  '
+            f'output={usage["output_tokens"]}'
+        )
+        print(
+            f'    cost      input=${cost["input_usd"]:.8f}  '
+            f'output=${cost["output_usd"]:.8f}  '
+            f'total=${cost["total_usd"]:.8f}'
         )
 
     # Print a preview of the response
@@ -144,16 +158,24 @@ def run(dry_run: bool = False) -> dict:
 
     # ── 6. Store result ───────────────────────────────────────────────────────
     store = ResultStore()   # writes to results/llm_results.jsonl by default
+    cost = exec_result['cost']
+    usage = exec_result['usage']
     record = {
         'llm': exec_result['llm'],
+        'model': exec_result['model'],
+        'provider': exec_result['provider'],
         'task_description': TASK['description'],
         'context_dominant': context['dominant'],
         'context_confidence': context['confidence'],
         'router_preferred': preferred,
         'router_confidence': recommendation['confidence'],
         'token_budget': allocation['token_budget'],
-        'tokens_used': exec_result['tokens_used'],
-        'cost_usd': exec_result['cost_usd'],
+        'input_tokens': usage['input_tokens'],
+        'output_tokens': usage['output_tokens'],
+        'cost_input_usd': cost['input_usd'],
+        'cost_output_usd': cost['output_usd'],
+        'cost_tool_usd': cost['tool_usd'],
+        'cost_total_usd': cost['total_usd'],
         'quality_score': eval_result['quality_score'],
         'eval_method': eval_result['method'],
         'dry_run': dry_run,
@@ -166,7 +188,7 @@ def run(dry_run: bool = False) -> dict:
         llm=exec_result['llm'],
         context_type=context['dominant'],
         quality_score=eval_result['quality_score'],
-        cost_usd=exec_result['cost_usd'],
+        cost_usd=exec_result['cost']['total_usd'],
     )
     summary = tracker.summary(exec_result['llm'])
     ctx = context['dominant']
@@ -205,3 +227,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

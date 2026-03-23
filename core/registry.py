@@ -11,8 +11,9 @@ ADAPTED FROM:
 HOW TO ADD A NEW LLM:
   1. Create agents/your_llm.py with a class implementing score(task) -> float
   2. Import it below and add an entry to LLM_REGISTRY
-  3. The router picks it up automatically — no other changes needed
-  4. Add a CHANGELOG.md entry
+  3. Set model_key to the matching "provider:model" key in models/registry.py
+  4. The router picks it up automatically — no other changes needed
+  5. Add a CHANGELOG.md entry
 
 CONTEXT AFFINITIES:
   'code_generation'  — LLMs specialised in writing and completing code
@@ -24,6 +25,10 @@ WEIGHT GUIDELINES:
   default_weight = 1.0 is the baseline.
   Adjust during scheduled effectiveness reviews only (see docs/SOP.md).
   Max change: ±20% per review cycle. Document the rationale in CHANGELOG.md.
+
+PRICING:
+  Do NOT add cost figures here. Pricing lives in models/registry.py.
+  model_key links this routing entry to its pricing entry.
 """
 
 # ── LLM Registry ──────────────────────────────────────────────────────────────
@@ -34,44 +39,46 @@ WEIGHT GUIDELINES:
 #   Negative = LLM is a poor fit.
 #   None = placeholder; router will skip static scoring for this entry
 #          (PerformanceTracker historical data will still be used if available).
+#
+# model_key: "provider:model" key into models/registry.py LLM_REGISTRY.
+#   Used by token_allocator (cost estimation) and performance_tracker (ROI).
+#   Set to '' for LLMs not yet registered in the models registry.
 LLM_REGISTRY: dict = {
     'claude': {
         'score_fn': None,               # Set to ClaudeAgent().score once implemented
         'context_affinity': 'neutral',  # Strong across all types
         'default_weight': 1.0,
-        'cost_per_1k_tokens': 0.015,    # USD — update to current pricing
+        'model_key': '',                # Set to e.g. 'anthropic:claude-3-5-sonnet'
     },
     'codex': {
         'score_fn': None,               # Set to CodexAgent().score once implemented
         'context_affinity': 'code_generation',
         'default_weight': 1.0,
-        'cost_per_1k_tokens': 0.002,
+        'model_key': '',                # Set to e.g. 'openai:gpt-4o' when wired
     },
     'gemini': {
         'score_fn': None,               # Set to GeminiAgent().score once implemented
         'context_affinity': 'content_writing',
         'default_weight': 1.0,
-        'cost_per_1k_tokens': 0.001,
+        'model_key': 'google:gemini-pro',
     },
     'gpt4o_mini': {
         'score_fn': None,               # Set to GPT4oMiniAgent().score once implemented
         'context_affinity': 'neutral',  # Capable across all context types
         'default_weight': 1.0,
-        # Must stay in sync with _COST_PER_1K_TOKENS['gpt-4o-mini'] in
-        # execution/openai_adapter.py — update both during pricing reviews.
-        'cost_per_1k_tokens': 0.0003,   # Blended input+output; update from openai.com/pricing
+        'model_key': 'openai:gpt-4o-mini',
     },
     # ── Future LLMs go here ───────────────────────────────────────────────────
-    # 'gpt4': {
-    #     'score_fn': GPT4Agent().score,
+    # 'gpt4o': {
+    #     'score_fn': GPT4oAgent().score,
     #     'context_affinity': 'neutral',
     #     'default_weight': 1.0,
-    #     'cost_per_1k_tokens': 0.030,
+    #     'model_key': 'openai:gpt-4o',
     # },
     # 'mistral': {
     #     'score_fn': MistralAgent().score,
     #     'context_affinity': 'data_analysis',
     #     'default_weight': 0.8,
-    #     'cost_per_1k_tokens': 0.0007,
+    #     'model_key': 'mistral:mixtral',
     # },
 }

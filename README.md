@@ -102,8 +102,79 @@ executor.register('gpt4o_mini', OpenAIAdapter())          # uses OPENAI_API_KEY
 executor.register('gpt4o',      OpenAIAdapter('gpt-4o'))  # higher capability
 
 result = executor.execute(prompt, allocation)
-# result: {'text': '...', 'tokens_used': 187, 'cost_usd': 0.000056, 'llm': 'gpt4o_mini'}
+# result: {
+#   'text': '...',
+#   'model': 'gpt-4o-mini',
+#   'provider': 'openai',
+#   'usage': {'input_tokens': 120, 'output_tokens': 67},
+#   'cost': {'input_usd': 1.8e-05, 'output_usd': 4.02e-05,
+#            'tool_usd': 0.0, 'total_usd': 5.82e-05},
+#   'llm': 'gpt4o_mini',
+# }
 ```
+
+---
+
+## Models Registry and Pricing Engine
+
+All pricing lives in `models/registry.py`. Each model is registered under a
+`"provider:model"` key with separate input and output prices.
+
+### Inspect pricing
+
+```python
+from models.registry import get_model, list_models
+from models.pricing import calculate_cost
+
+# List all registered models
+print(list_models())            # ['google:gemini-pro', 'mistral:mixtral', ...]
+print(list_models('openai'))    # ['openai:gpt-3.5-turbo', 'openai:gpt-4o', ...]
+
+# Get a model entry
+entry = get_model('openai:gpt-4o-mini')
+print(entry['input_price_per_1k'])   # 0.00015 (USD per 1k input tokens)
+print(entry['output_price_per_1k'])  # 0.0006
+
+# Calculate cost from token usage
+cost = calculate_cost(
+    model_key='openai:gpt-4o-mini',
+    usage={'input_tokens': 800, 'output_tokens': 400},
+)
+# → {'input_usd': 0.00012, 'output_usd': 0.00024,
+#    'tool_usd': 0.0, 'total_usd': 0.00036}
+```
+
+### Adding a new model
+
+1. Add a pricing entry to `models/registry.py`:
+
+   ```python
+   'myprovider:my-model': {
+       'provider': 'myprovider',
+       'model': 'my-model',
+       'input_price_per_1k': 0.001,
+       'output_price_per_1k': 0.002,
+       'context_window': 32_768,
+       'capabilities': ['chat', 'code'],
+       'type': 'text',
+       'notes': 'My new model.',
+   }
+   ```
+
+2. Add a routing entry to `core/registry.py` (set `model_key` to the key above):
+
+   ```python
+   'my_model': {
+       'score_fn': None,
+       'context_affinity': 'neutral',
+       'default_weight': 1.0,
+       'model_key': 'myprovider:my-model',
+   }
+   ```
+
+3. Subclass `LLMAdapter` and implement `complete()` for your provider.
+4. Register it: `executor.register('my_model', MyAdapter())`
+5. Add a `CHANGELOG.md` entry.
 
 ---
 
@@ -127,6 +198,9 @@ See `ARCHITECTURE.md` for the full design.
 
 ## Project Status
 
-Current version: **v0.2.0** — execution layer, OpenAI adapter, LLM-as-judge evaluator, JSONL result store, ROI engine.
+Current version: **v0.3.0** — models registry, centralised pricing engine,
+structured cost output per execution call.
+
+Previous: v0.2.0 — execution layer, OpenAI adapter, LLM-as-judge evaluator, JSONL result store, ROI engine.
 
 See `CHANGELOG.md` for version history and planned work.

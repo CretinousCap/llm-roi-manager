@@ -13,6 +13,17 @@ HOW IT WORKS:
      token_allocator.allocate()). The executor routes to the right adapter,
      calls complete(), and returns a standardised result dict.
 
+ADAPTER CONTRACT:
+  complete() must return a dict with:
+    text:     str   — generated text
+    model:    str   — model name (e.g. 'gpt-4o-mini')
+    provider: str   — provider identifier (e.g. 'openai')
+    usage:    dict  — {'input_tokens': int, 'output_tokens': int}
+    cost:     dict  — {'input_usd': float, 'output_usd': float,
+                        'tool_usd': float, 'total_usd': float}
+
+  The executor appends 'llm' and 'skipped' to produce the final result.
+
 ADDING A NEW PROVIDER:
   Subclass LLMAdapter, implement complete(), then register the instance with
   LLMExecutor.register(). No changes to the router or registry are needed.
@@ -28,8 +39,13 @@ USAGE:
       prompt='Write a sort function in Python.',
       allocation={'preferred_llm': 'claude', 'token_budget': 2000},
   )
-  # result: {'text': '...', 'tokens_used': 312, 'cost_usd': 0.005,
-  #          'llm': 'claude', 'skipped': False}
+  # result: {
+  #   'text': '...', 'model': 'claude-3-5-sonnet', 'provider': 'anthropic',
+  #   'usage': {'input_tokens': 120, 'output_tokens': 192},
+  #   'cost': {'input_usd': 0.00036, 'output_usd': 0.00288,
+  #            'tool_usd': 0.0, 'total_usd': 0.00324},
+  #   'llm': 'claude', 'skipped': False,
+  # }
 """
 
 from __future__ import annotations
@@ -59,9 +75,12 @@ class LLMAdapter(ABC):
 
         Returns:
             dict with:
-              text:        str — generated text
-              tokens_used: int — tokens consumed (prompt + completion)
-              cost_usd:    float — actual cost of this call in USD
+              text:     str  — generated text
+              model:    str  — model name used (e.g. 'gpt-4o-mini')
+              provider: str  — provider identifier (e.g. 'openai')
+              usage:    dict — {'input_tokens': int, 'output_tokens': int}
+              cost:     dict — {'input_usd': float, 'output_usd': float,
+                                 'tool_usd': float, 'total_usd': float}
         """
         ...
 
@@ -118,22 +137,30 @@ class LLMExecutor:
 
         Returns:
             dict with:
-              text:        str — generated text (empty string if no adapter)
-              tokens_used: int — tokens consumed
-              cost_usd:    float — actual cost in USD
-              llm:         str — LLM name used
-              skipped:     bool — True if no adapter registered for this LLM
+              text:     str   — generated text (empty string if no adapter)
+              model:    str   — model name used
+              provider: str   — provider identifier
+              usage:    dict  — {'input_tokens': int, 'output_tokens': int}
+              cost:     dict  — {'input_usd': float, 'output_usd': float,
+                                  'tool_usd': float, 'total_usd': float}
+              llm:      str   — LLM registry name used
+              skipped:  bool  — True if no adapter registered for this LLM
         """
         llm_name = llm_override or allocation.get('preferred_llm', '')
         max_tokens = allocation.get(
             'token_budget', self.cfg['default_max_tokens']
         )
 
+        _zero_cost = {'input_usd': 0.0, 'output_usd': 0.0,
+                      'tool_usd': 0.0, 'total_usd': 0.0}
+
         if llm_name not in self._adapters:
             return {
                 'text': '',
-                'tokens_used': 0,
-                'cost_usd': 0.0,
+                'model': '',
+                'provider': '',
+                'usage': {'input_tokens': 0, 'output_tokens': 0},
+                'cost': _zero_cost,
                 'llm': llm_name,
                 'skipped': True,
             }
@@ -142,8 +169,10 @@ class LLMExecutor:
         raw = adapter.complete(prompt, max_tokens=max_tokens, **kwargs)
         return {
             'text': raw.get('text', ''),
-            'tokens_used': raw.get('tokens_used', 0),
-            'cost_usd': raw.get('cost_usd', 0.0),
+            'model': raw.get('model', ''),
+            'provider': raw.get('provider', ''),
+            'usage': raw.get('usage', {'input_tokens': 0, 'output_tokens': 0}),
+            'cost': raw.get('cost', _zero_cost),
             'llm': llm_name,
             'skipped': False,
         }
