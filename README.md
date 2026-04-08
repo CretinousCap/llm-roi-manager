@@ -34,6 +34,22 @@ python examples/run_task.py
 
 # Try the pipeline without an API key:
 python examples/run_task.py --dry-run
+
+# Use your existing provider keys/subscriptions:
+export ANTHROPIC_API_KEY=...
+python examples/run_task.py --provider anthropic
+
+export GEMINI_API_KEY=...
+python examples/run_task.py --provider gemini
+
+export OPENROUTER_API_KEY=...
+python examples/run_task.py --provider openrouter_claude
+python examples/run_task.py --provider openrouter_grok
+python examples/run_task.py --provider openrouter_gemini
+
+# Local Ollama (Qwen/Phi) via OpenAI-compatible endpoint:
+python examples/run_task.py --provider ollama_qwen9b
+python examples/run_task.py --provider ollama_phi
 ```
 
 Output:
@@ -95,11 +111,37 @@ with WrapSession(task=task, context=context) as session:
 
 ```python
 from execution.openai_adapter import OpenAIAdapter
+from execution.anthropic_adapter import AnthropicAdapter
+from execution.gemini_adapter import GeminiAdapter
 from execution.llm_executor import LLMExecutor
 
 executor = LLMExecutor()
 executor.register('gpt4o_mini', OpenAIAdapter())          # uses OPENAI_API_KEY
 executor.register('gpt4o',      OpenAIAdapter('gpt-4o'))  # higher capability
+executor.register('claude',     AnthropicAdapter())       # uses ANTHROPIC_API_KEY
+executor.register('gemini',     GeminiAdapter())          # uses GEMINI_API_KEY
+
+# OpenRouter / Ollama via OpenAI-compatible adapter:
+executor.register(
+    'grok',
+    OpenAIAdapter(
+        model='x-ai/grok-3-mini-beta',
+        provider='openrouter',
+        api_key_env='OPENROUTER_API_KEY',
+        base_url='https://openrouter.ai/api/v1',
+        model_key='openrouter:x-ai/grok-3-mini-beta',
+    ),
+)
+executor.register(
+    'qwen9b_ollama',
+    OpenAIAdapter(
+        model='qwen2.5-coder:9b',
+        provider='ollama',
+        api_key='ollama',
+        base_url='http://localhost:11434/v1',
+        model_key='ollama:qwen2.5-coder:9b',
+    ),
+)
 
 result = executor.execute(prompt, allocation)
 # result: {
@@ -112,6 +154,10 @@ result = executor.execute(prompt, allocation)
 #   'llm': 'gpt4o_mini',
 # }
 ```
+
+> `fal.ai`: if your chosen fal.ai endpoint is OpenAI-compatible, wire it with
+> `OpenAIAdapter(provider='fal', api_key_env='FAL_KEY', base_url='...')`.
+> Otherwise, add a dedicated `LLMAdapter` for that endpoint.
 
 ---
 

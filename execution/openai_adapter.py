@@ -1,26 +1,30 @@
 """
-OpenAI Adapter — Concrete LLMAdapter for OpenAI Chat Completions
-=================================================================
+OpenAI-Compatible Adapter — Concrete LLMAdapter for OpenAI-style Chat APIs
+===========================================================================
 PURPOSE:
-  Wire OpenAI's Chat Completions API into LLMExecutor. Reads the API key
-  from the OPENAI_API_KEY environment variable. No key is ever stored in
-  source code.
+  Wire OpenAI-style Chat Completions APIs into LLMExecutor. Works with OpenAI
+  directly and with OpenAI-compatible endpoints (OpenRouter, xAI-compatible
+  gateways, Ollama's local OpenAI endpoint, etc.).
 
 SUPPORTED MODELS:
-  - 'gpt-4o-mini' (default) — fast, cheap, capable; good for most tasks
-  - 'gpt-4o'                — highest capability, higher cost
-  - 'gpt-3.5-turbo'        — legacy, cheapest option
-
-  Pricing is read from models/registry.py — there are no hardcoded figures
-  in this file. Update pricing by editing models/registry.py only.
+  Any model accepted by the target OpenAI-compatible endpoint.
+  Known OpenAI models are mapped to model registry keys for cost calculation.
 
 USAGE:
   from execution.openai_adapter import OpenAIAdapter
   from execution.llm_executor import LLMExecutor
 
   executor = LLMExecutor()
-  executor.register('gpt4o_mini', OpenAIAdapter())        # default model
-  executor.register('gpt4o',      OpenAIAdapter('gpt-4o'))
+  executor.register('gpt4o_mini', OpenAIAdapter())        # OpenAI default model
+  executor.register(
+      'openrouter_claude',
+      OpenAIAdapter(
+          model='anthropic/claude-3.5-sonnet',
+          provider='openrouter',
+          api_key_env='OPENROUTER_API_KEY',
+          base_url='https://openrouter.ai/api/v1',
+      ),
+  )
 
   result = executor.execute(prompt, allocation)
   # result: {
@@ -34,9 +38,9 @@ USAGE:
   #   'skipped': False,
   # }
 
-ENVIRONMENT:
-  OPENAI_API_KEY  — required; your OpenAI secret key (sk-...)
-  OPENAI_BASE_URL — optional; override for proxies / Azure OpenAI endpoints
+ENVIRONMENT (defaults):
+  OPENAI_API_KEY  — required API key unless api_key is passed directly
+  OPENAI_BASE_URL — optional base URL override
 """
 
 from __future__ import annotations
@@ -45,8 +49,6 @@ import os
 import time
 
 from execution.llm_executor import LLMAdapter
-
-_PROVIDER = 'openai'
 
 # Maps OpenAI model names to their "provider:model" keys in models/registry.py.
 # Add new models here when they are added to the models registry.
@@ -76,10 +78,22 @@ class OpenAIAdapter(LLMAdapter):
 
     def __init__(self, model: str = _DEFAULT_MODEL,
                  temperature: float = 0.7,
-                 system: str = ''):
+                 system: str = '',
+                 provider: str = 'openai',
+                 model_key: str = '',
+                 api_key: str = '',
+                 base_url: str = '',
+                 api_key_env: str = 'OPENAI_API_KEY',
+                 base_url_env: str = 'OPENAI_BASE_URL'):
         self.model = model
         self.temperature = temperature
         self.system = system
+        self.provider = provider
+        self.model_key = model_key
+        self.api_key = api_key
+        self.base_url = base_url
+        self.api_key_env = api_key_env
+        self.base_url_env = base_url_env
         self._client = None  # Created lazily on first complete() call
 
     def _get_client(self):
@@ -93,13 +107,13 @@ class OpenAIAdapter(LLMAdapter):
                 "The 'openai' package is required to use OpenAIAdapter. "
                 "Install it with: pip install openai"
             ) from exc
-        api_key = os.environ.get('OPENAI_API_KEY', '').strip()
+        api_key = (self.api_key or os.environ.get(self.api_key_env, '')).strip()
         if not api_key:
             raise EnvironmentError(
-                "OPENAI_API_KEY environment variable is not set. "
-                "Export your OpenAI secret key before running."
+                f"{self.api_key_env} environment variable is not set. "
+                f"Export your {self.provider} API key before running."
             )
-        base_url = os.environ.get('OPENAI_BASE_URL') or None
+        base_url = self.base_url or os.environ.get(self.base_url_env) or None
         self._client = openai.OpenAI(api_key=api_key, base_url=base_url)
         return self._client
 
@@ -160,7 +174,7 @@ class OpenAIAdapter(LLMAdapter):
             'output_tokens': output_tokens,
         }
 
-        model_key = _MODEL_KEYS.get(self.model, '')
+        model_key = self.model_key or _MODEL_KEYS.get(self.model, '')
         if model_key:
             cost = calculate_cost(model_key, usage)
         else:
@@ -171,10 +185,9 @@ class OpenAIAdapter(LLMAdapter):
         return {
             'text': text,
             'model': self.model,
-            'provider': _PROVIDER,
+            'provider': self.provider,
             'mode': 'chat',
             'latency_ms': latency_ms,
             'usage': usage,
             'cost': cost,
         }
-
