@@ -2,13 +2,16 @@
 """
 run_task.py — Minimal end-to-end LLM ROI Manager example
 ==========================================================
-Demonstrates the full pipeline with one real OpenAI call:
+Demonstrates the full pipeline with one real LLM call:
 
   task → classify → route → allocate → execute → evaluate → store → track
 
 Usage:
   OPENAI_API_KEY=sk-...  python examples/run_task.py
-  OPENAI_API_KEY=sk-...  python examples/run_task.py --dry-run   # skip API call
+  ANTHROPIC_API_KEY=...  python examples/run_task.py --provider anthropic
+  GEMINI_API_KEY=...     python examples/run_task.py --provider gemini
+  OPENROUTER_API_KEY=... python examples/run_task.py --provider openrouter_claude
+  python examples/run_task.py --provider ollama_qwen9b --dry-run
 
 The script prints each pipeline step with its output so you can see what
 each module contributes.  Results are written to results/llm_results.jsonl.
@@ -51,20 +54,88 @@ BILLING_METADATA = {
     'environment':  'dev',
 }
 
-# ── LLM wired for this example ────────────────────────────────────────────────
-_ADAPTER_LLM = 'gpt4o_mini'   # must match a key in core/registry.py LLM_REGISTRY
-_OPENAI_MODEL = 'gpt-4o-mini'  # underlying model passed to OpenAI API
+# ── LLM wiring presets for this example ───────────────────────────────────────
+_PROVIDER_PRESETS = {
+    'openai': {
+        'llm': 'gpt4o_mini',
+        'model': 'gpt-4o-mini',
+    },
+    'anthropic': {
+        'llm': 'claude',
+        'model': 'claude-3-5-sonnet-latest',
+    },
+    'gemini': {
+        'llm': 'gemini',
+        'model': 'gemini-pro',
+    },
+    'openrouter_claude': {
+        'llm': 'claude',
+        'model': 'anthropic/claude-3.5-sonnet',
+    },
+    'openrouter_grok': {
+        'llm': 'grok',
+        'model': 'x-ai/grok-3-mini-beta',
+    },
+    'openrouter_gemini': {
+        'llm': 'gemini',
+        'model': 'google/gemini-2.0-flash-001',
+    },
+    'ollama_qwen9b': {
+        'llm': 'qwen9b_ollama',
+        'model': 'qwen2.5-coder:9b',
+    },
+    'ollama_phi': {
+        'llm': 'phi_ollama',
+        'model': 'phi4',
+    },
+}
 
 
-def _build_executor() -> LLMExecutor:
-    """Create and register the OpenAI adapter."""
-    from execution.openai_adapter import OpenAIAdapter
+def _build_executor(provider: str) -> tuple[LLMExecutor, str, str]:
+    """Create and register one adapter based on a provider preset."""
     executor = LLMExecutor()
-    executor.register(_ADAPTER_LLM, OpenAIAdapter(model=_OPENAI_MODEL))
-    return executor
+    preset = _PROVIDER_PRESETS[provider]
+    llm_name = preset['llm']
+    model = preset['model']
+
+    if provider == 'anthropic':
+        from execution.anthropic_adapter import AnthropicAdapter
+        executor.register(llm_name, AnthropicAdapter(model=model))
+    elif provider == 'gemini':
+        from execution.gemini_adapter import GeminiAdapter
+        executor.register(llm_name, GeminiAdapter(model=model))
+    elif provider.startswith('openrouter_'):
+        from execution.openai_adapter import OpenAIAdapter
+        executor.register(
+            llm_name,
+            OpenAIAdapter(
+                model=model,
+                provider='openrouter',
+                api_key_env='OPENROUTER_API_KEY',
+                base_url='https://openrouter.ai/api/v1',
+                model_key=f'openrouter:{model}',
+            ),
+        )
+    elif provider.startswith('ollama_'):
+        from execution.openai_adapter import OpenAIAdapter
+        executor.register(
+            llm_name,
+            OpenAIAdapter(
+                model=model,
+                provider='ollama',
+                api_key='ollama',
+                base_url='http://localhost:11434/v1',
+                model_key=f'ollama:{model}',
+            ),
+        )
+    else:
+        from execution.openai_adapter import OpenAIAdapter
+        executor.register(llm_name, OpenAIAdapter(model=model))
+
+    return executor, llm_name, model
 
 
-def run(dry_run: bool = False) -> dict:
+def run(dry_run: bool = False, provider: str = 'openai') -> dict:
     """
     Execute the full pipeline and return the final record dict.
 
@@ -111,6 +182,8 @@ def run(dry_run: bool = False) -> dict:
     )
 
     # ── 4. Execute ────────────────────────────────────────────────────────────
+    configured_model = _PROVIDER_PRESETS[provider]['model']
+    configured_llm = _PROVIDER_PRESETS[provider]['llm']
     if dry_run:
         # Bypass real API call — use a canned response for testing
         from execution.llm_executor import _normalise_billing
@@ -126,8 +199,8 @@ def run(dry_run: bool = False) -> dict:
                 '    memo[n] = fib(n - 1, memo) + fib(n - 2, memo)\n'
                 '    return memo[n]\n'
             ),
-            'model': _OPENAI_MODEL,
-            'provider': 'openai',
+            'model': configured_model,
+            'provider': provider,
             'mode': 'chat',
             'latency_ms': 0.0,
             'usage': {'input_tokens': 0, 'output_tokens': 0},
@@ -135,16 +208,16 @@ def run(dry_run: bool = False) -> dict:
                      'tool_usd': 0.0, 'total_usd': 0.0},
             'error': None,
             'billing': _normalise_billing(BILLING_METADATA),
-            'llm': _ADAPTER_LLM,
+            'llm': configured_llm,
             'skipped': False,
             'tokens_used': 0,
             'cost_usd': 0.0,
         }
         print(f'[4] Execute   [DRY RUN — no API call made]')
     else:
-        executor = _build_executor()
+        executor, configured_llm, _ = _build_executor(provider)
         llm_to_use = preferred if preferred in executor.available_llms() \
-            else _ADAPTER_LLM
+            else configured_llm
         if llm_to_use != preferred:
             print(
                 f'[4] Execute   WARNING: router preferred {preferred!r} but no '
@@ -283,19 +356,35 @@ def main() -> None:
         '--dry-run', action='store_true',
         help='Skip the real OpenAI API call and use a canned response.'
     )
+    parser.add_argument(
+        '--provider',
+        default='openai',
+        choices=sorted(_PROVIDER_PRESETS),
+        help='Provider preset to run (openai, anthropic, gemini, openrouter_*, ollama_*).',
+    )
     args = parser.parse_args()
 
-    if not args.dry_run and not os.environ.get('OPENAI_API_KEY'):
-        print(
-            'Error: OPENAI_API_KEY is not set.\n'
-            'Set it with:  export OPENAI_API_KEY=sk-...\n'
-            'Or run with:  python examples/run_task.py --dry-run'
-        )
-        sys.exit(1)
+    if not args.dry_run:
+        required_env = {
+            'openai': 'OPENAI_API_KEY',
+            'anthropic': 'ANTHROPIC_API_KEY',
+            'gemini': 'GEMINI_API_KEY',
+            'openrouter_claude': 'OPENROUTER_API_KEY',
+            'openrouter_grok': 'OPENROUTER_API_KEY',
+            'openrouter_gemini': 'OPENROUTER_API_KEY',
+            'ollama_qwen9b': '',
+            'ollama_phi': '',
+        }[args.provider]
+        if required_env and not os.environ.get(required_env):
+            print(
+                f'Error: {required_env} is not set.\n'
+                f'Set it with:  export {required_env}=...\n'
+                'Or run with:  python examples/run_task.py --dry-run'
+            )
+            sys.exit(1)
 
-    run(dry_run=args.dry_run)
+    run(dry_run=args.dry_run, provider=args.provider)
 
 
 if __name__ == '__main__':
     main()
-

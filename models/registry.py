@@ -32,6 +32,7 @@ HOW TO EXTEND:
 
 PRICING SOURCES:
   - OpenAI:  https://openai.com/pricing
+  - Anthropic: https://www.anthropic.com/pricing
   - xAI:     https://x.ai/api
   - Google:  https://ai.google.dev/pricing
   - Mistral: https://mistral.ai/technology/#pricing
@@ -75,6 +76,27 @@ LLM_REGISTRY: dict = {
         'type': 'text',
         'notes': 'Legacy model; cheaper but lower capability than gpt-4o-mini.',
     },
+    # ── Anthropic ──────────────────────────────────────────────────────────────
+    'anthropic:claude-3-5-sonnet': {
+        'provider': 'anthropic',
+        'model': 'claude-3-5-sonnet-latest',
+        'input_price_per_1k': 0.003000,
+        'output_price_per_1k': 0.015000,
+        'context_window': 200_000,
+        'capabilities': ['chat', 'code', 'reasoning'],
+        'type': 'text',
+        'notes': 'Claude Sonnet pricing; verify latest official rates.',
+    },
+    'anthropic:claude-3-7-sonnet': {
+        'provider': 'anthropic',
+        'model': 'claude-3-7-sonnet-latest',
+        'input_price_per_1k': 0.003000,
+        'output_price_per_1k': 0.015000,
+        'context_window': 200_000,
+        'capabilities': ['chat', 'code', 'reasoning'],
+        'type': 'text',
+        'notes': 'Placeholder pricing; verify official rates before production use.',
+    },
     # ── xAI ───────────────────────────────────────────────────────────────────
     'xai:grok-4.20-reasoning': {
         'provider': 'xai',
@@ -107,6 +129,67 @@ LLM_REGISTRY: dict = {
         'capabilities': ['chat', 'code', 'reasoning'],
         'type': 'text',
         'notes': 'Placeholder pricing; verify from Mistral AI pricing page.',
+    },
+    # ── OpenRouter / Local / Other gateways ───────────────────────────────────
+    'openrouter:anthropic/claude-3.5-sonnet': {
+        'provider': 'openrouter',
+        'model': 'anthropic/claude-3.5-sonnet',
+        'input_price_per_1k': 0.0,
+        'output_price_per_1k': 0.0,
+        'context_window': 200_000,
+        'capabilities': ['chat', 'code', 'reasoning'],
+        'type': 'text',
+        'notes': 'Set your OpenRouter-specific pricing before production use.',
+    },
+    'openrouter:x-ai/grok-3-mini-beta': {
+        'provider': 'openrouter',
+        'model': 'x-ai/grok-3-mini-beta',
+        'input_price_per_1k': 0.0,
+        'output_price_per_1k': 0.0,
+        'context_window': 128_000,
+        'capabilities': ['chat', 'code', 'reasoning'],
+        'type': 'text',
+        'notes': 'Set your OpenRouter-specific pricing before production use.',
+    },
+    'openrouter:google/gemini-2.0-flash-001': {
+        'provider': 'openrouter',
+        'model': 'google/gemini-2.0-flash-001',
+        'input_price_per_1k': 0.0,
+        'output_price_per_1k': 0.0,
+        'context_window': 1_000_000,
+        'capabilities': ['chat', 'code', 'reasoning'],
+        'type': 'text',
+        'notes': 'Set your OpenRouter-specific pricing before production use.',
+    },
+    'ollama:qwen2.5-coder:9b': {
+        'provider': 'ollama',
+        'model': 'qwen2.5-coder:9b',
+        'input_price_per_1k': 0.0,
+        'output_price_per_1k': 0.0,
+        'context_window': 32_768,
+        'capabilities': ['chat', 'code'],
+        'type': 'text',
+        'notes': 'Local model; token cost tracked as $0 by default.',
+    },
+    'ollama:phi4': {
+        'provider': 'ollama',
+        'model': 'phi4',
+        'input_price_per_1k': 0.0,
+        'output_price_per_1k': 0.0,
+        'context_window': 16_384,
+        'capabilities': ['chat', 'code', 'reasoning'],
+        'type': 'text',
+        'notes': 'Local model; token cost tracked as $0 by default.',
+    },
+    'fal:fal-ai/any-llm': {
+        'provider': 'fal',
+        'model': 'fal-ai/any-llm',
+        'input_price_per_1k': 0.0,
+        'output_price_per_1k': 0.0,
+        'context_window': 8_192,
+        'capabilities': ['chat'],
+        'type': 'text',
+        'notes': 'Placeholder for fal.ai text workflows; set pricing before production use.',
     },
 }
 

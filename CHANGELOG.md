@@ -11,6 +11,25 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added — Multi-Provider Adapter Onboarding
+
+- `execution/anthropic_adapter.py`: Added an Anthropic Messages API adapter
+  (`AnthropicAdapter`) for direct Claude API usage via `ANTHROPIC_API_KEY`.
+- `execution/gemini_adapter.py`: Added a Gemini REST adapter
+  (`GeminiAdapter`) for direct Gemini API usage via `GEMINI_API_KEY`.
+- `examples/run_task.py`: Added `--provider` presets for OpenAI, Anthropic,
+  Gemini, OpenRouter-backed Claude/Grok/Gemini, and local Ollama
+  (`qwen2.5-coder:9b`, `phi4`).
+- `models/registry.py`: Added model entries for Anthropic Claude, OpenRouter
+  presets, local Ollama models, and a fal.ai placeholder model key.
+- `core/registry.py`: Added routing entries for Grok and local Ollama models
+  and linked Claude to its Anthropic model key.
+- `execution/openai_adapter.py`: Generalised adapter configuration so it can
+  target OpenAI-compatible gateways by overriding provider, key env var, base
+  URL, and model key.
+- `README.md`: Documented how to run the example with ChatGPT/OpenAI, Claude,
+  Gemini, Grok via OpenRouter, and local Ollama.
+
 ### Added — Execution Observability and Billing Context (v0.4.0)
 
 **Execution observability (requirements 1–7):**

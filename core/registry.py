@@ -48,7 +48,7 @@ LLM_REGISTRY: dict = {
         'score_fn': None,               # Set to ClaudeAgent().score once implemented
         'context_affinity': 'neutral',  # Strong across all types
         'default_weight': 1.0,
-        'model_key': '',                # Set to e.g. 'anthropic:claude-3-5-sonnet'
+        'model_key': 'anthropic:claude-3-5-sonnet',
     },
     'codex': {
         'score_fn': None,               # Set to CodexAgent().score once implemented
@@ -61,6 +61,24 @@ LLM_REGISTRY: dict = {
         'context_affinity': 'content_writing',
         'default_weight': 1.0,
         'model_key': 'google:gemini-pro',
+    },
+    'grok': {
+        'score_fn': None,               # Set to GrokAgent().score once implemented
+        'context_affinity': 'data_analysis',
+        'default_weight': 1.0,
+        'model_key': 'xai:grok-4.20-reasoning',
+    },
+    'qwen9b_ollama': {
+        'score_fn': None,               # Set to QwenAgent().score once implemented
+        'context_affinity': 'code_generation',
+        'default_weight': 0.9,
+        'model_key': 'ollama:qwen2.5-coder:9b',
+    },
+    'phi_ollama': {
+        'score_fn': None,               # Set to PhiAgent().score once implemented
+        'context_affinity': 'neutral',
+        'default_weight': 0.9,
+        'model_key': 'ollama:phi4',
     },
     'gpt4o_mini': {
         'score_fn': None,               # Set to GPT4oMiniAgent().score once implemented
